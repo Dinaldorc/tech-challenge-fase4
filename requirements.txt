@@ -1,0 +1,8 @@
+# Python 3.11
+
+# Dados e analise exploratoria
+pandas>=3.0,<4
+pyarrow>=20.0
+matplotlib>=3.9
+notebook>=7.0
+ipykernel>=6.29
