@@ -8,8 +8,8 @@ venv/
 .DS_Store
 .claude/
 
-# Base Olist (Kaggle) - baixada manualmente, ver README
-data/*.csv
+# Geolocalizacao da Olist (61 MB): nao usada pela solucao, ver README
+data/raw/olist_geolocation_dataset.csv
 
 # Artefatos gerados pelos scripts (reproduziveis)
 data/processed/
