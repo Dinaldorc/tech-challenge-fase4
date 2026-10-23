@@ -4,5 +4,6 @@
 pandas>=3.0,<4
 pyarrow>=20.0
 matplotlib>=3.9
+scikit-learn>=1.5
 notebook>=7.0
 ipykernel>=6.29
