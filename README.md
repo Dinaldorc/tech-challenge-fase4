@@ -22,7 +22,7 @@ O `olist_geolocation_dataset.csv` (61 MB) não foi versionado, porque a soluçã
 
 ## Análise exploratória
 
-O notebook [notebooks/01_eda_avaliacoes.ipynb](notebooks/01_eda_avaliacoes.ipynb) analisa as avaliações antes da construção da base de conhecimento: quantas têm texto, tamanho e qualidade dos comentários, duplicatas, valores ausentes e quais metadados se associam à insatisfação. Cada achado termina numa decisão de preparo da base.
+O notebook [notebooks/01_eda_avaliacoes.ipynb](notebooks/01_eda_avaliacoes.ipynb) analisa as avaliações antes da construção da base de conhecimento: quantas têm texto, tamanho e qualidade dos comentários, vocabulário (*Bag of Words* e TF-IDF), duplicatas, valores ausentes e quais metadados se associam à insatisfação. Cada achado termina numa decisão de preparo da base, e as escolhas com mais de uma alternativa razoável trazem a comparação que levou à decisão. A última seção resume as técnicas de processamento de texto usadas, onde e por quê.
 
 O notebook está salvo com as saídas e pode ser lido direto no GitHub. Para executá-lo localmente (Python 3.11):
 
