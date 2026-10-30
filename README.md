@@ -33,6 +33,35 @@ pip install -r requirements.txt
 jupyter notebook notebooks/01_eda_avaliacoes.ipynb
 ```
 
+## Preparo da base de documentos
+
+O módulo [src/preprocessing.py](src/preprocessing.py) aplica as decisões da análise exploratória e gera a base que será indexada pelo RAG:
+
+- **Um documento por avaliação** (`review_id`), com título e comentário juntos. Entram as avaliações que têm qualquer um dos dois (42.370 de 98.410). Não há *chunking*: os comentários têm no máximo cerca de 200 caracteres.
+- **Limpeza leve** do texto: remove quebras de linha, espaços extras e pontuação repetida em excesso, mantendo caixa, acentos, emojis e negações.
+- **Texto normalizado** em coluna separada (`text_norm`: minúsculas, sem acentos, sem pontuação), usado só para identificar comentários repetidos na hora de escolher as evidências.
+- **Baixa informação** (`low_information`): textos sem nenhuma palavra de 3 letras ou mais, como ".", "ok" e "10" (cerca de 1% da base). Ficam na base, mas são marcados.
+- **Metadados**: nota, sentimento (negativo 1–2, neutro 3, positivo 4–5), status do pedido, status e dias de atraso da entrega, categoria do produto e datas.
+  - Status da entrega: `no_prazo`, `atrasado` e, para os pedidos sem data de entrega, `entregue_sem_data`, `enviado_nao_recebido`, `nao_enviado` ou `cancelado_indisponivel`.
+  - Categoria: a do primeiro item do pedido, ou `sem_itens` (pedido sem nenhum item) e `desconhecida` (produto sem categoria cadastrada).
+
+Para gerar a base:
+
+```bash
+python scripts/prepare_data.py
+```
+
+| Saída | Conteúdo |
+| --- | --- |
+| `data/processed/reviews_docs.parquet` | Base completa. Não é versionada: o script a recria a partir de `data/raw/` |
+| [data/sample/reviews_sample.csv](data/sample/reviews_sample.csv) | Amostra de 3.000 documentos, com a mesma proporção de notas da base, para testar o sistema mais rápido. Versionada |
+
+O tamanho da amostra e a semente podem ser alterados com `--sample-size` e `--seed`. Para rodar os testes:
+
+```bash
+pytest
+```
+
 ## Licença dos dados
 
 A base é publicada pela Olist sob [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) e é redistribuída aqui para fins acadêmicos e não comerciais, com atribuição à fonte original.
