@@ -14,3 +14,4 @@ data/raw/olist_geolocation_dataset.csv
 # Artefatos gerados pelos scripts (reproduziveis)
 data/processed/
 chroma_db/
+chroma_db_sample/

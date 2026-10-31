@@ -68,11 +68,11 @@ Nesta etapa, cada avaliação vira um vetor numérico (*embedding*) que represen
 - [scripts/compare_search.py](scripts/compare_search.py): reproduz a comparação entre E5 e BM25 descrita no Achado 1.
 
 ```bash
-python scripts/build_index.py                     # amostra de 3.000 documentos
-python scripts/build_index.py --input data/processed/reviews_docs.parquet --reset   # base completa
+python scripts/prepare_data.py    # gera a base completa, se ainda não existir
+python scripts/build_index.py     # indexa a base completa (42.370 documentos)
 ```
 
-Na primeira execução, o modelo (1,1 GB) é baixado do Hugging Face e fica em cache. O índice é gravado em `chroma_db/`, que não é versionado porque o script o recria.
+Na primeira execução, o modelo (1,1 GB) é baixado do Hugging Face e fica em cache. O índice é gravado em `chroma_db/`, que não é versionado porque o script o recria. O padrão é a base completa porque o corte de recusa da busca foi calibrado nela (ver "Calibração do corte de recusa"). Para indexar outra base, use `--input`, e `--reset` para recriar o índice do zero.
 
 | | Amostra | Base completa |
 | --- | --- | --- |
@@ -80,7 +80,7 @@ Na primeira execução, o modelo (1,1 GB) é baixado do Hugging Face e fica em c
 | Tempo de indexação (CPU, sem GPU) | 37 s | 10,5 min |
 | Tamanho do índice | 16 MB | 205 MB |
 
-A amostra é o padrão do script: ela permite testar o sistema em menos de um minuto. A base completa é a que deve ser usada nas análises.
+A base completa é o padrão do script, porque é ela que o sistema usa nas análises e foi nela que o corte de recusa foi calibrado. A amostra serve aos experimentos de comparação e para testar o código rapidamente, em menos de um minuto.
 
 ### Decisões e alternativas avaliadas
 
@@ -154,7 +154,7 @@ Com o índice da amostra, rodamos perguntas reais e olhamos os resultados. Três
 Um resultado foi considerado relevante quando o comentário reclama de atraso ou de não entrega. Para reproduzir:
 
 ```bash
-python scripts/build_index.py
+python scripts/build_index.py --input data/sample/reviews_sample.csv --persist-dir chroma_db_sample
 python scripts/compare_search.py
 ```
 
@@ -192,10 +192,84 @@ O filtro `delivery_status = atrasado` também funciona para esta pergunta: na bu
 
 #### Achados 2 e 3
 
-2. **As similaridades do E5 ficam concentradas numa faixa estreita.** Perguntas sobre o tema tiveram similaridade de 0,86 a 0,93 com o melhor resultado. Perguntas sem relação nenhuma ("qual a capital da França?", "como declarar imposto de renda") ficaram entre 0,80 e 0,85. **Consequência:** um limite fixo de similaridade sozinho não basta para o sistema recusar perguntas sem evidência. O limite precisa ser calibrado com exemplos e combinado com a verificação do próprio LLM.
+2. **As similaridades do E5 ficam concentradas numa faixa estreita.** Perguntas sobre o tema tiveram similaridade de 0,86 a 0,93 com o melhor resultado. Perguntas sem relação nenhuma ("qual a capital da França?", "como declarar imposto de renda") ficaram entre 0,80 e 0,85. **Consequência:** um limite fixo de similaridade sozinho não basta para o sistema recusar perguntas sem evidência. O limite precisa ser calibrado com exemplos e combinado com a verificação do próprio LLM. A calibração está em "Busca das evidências", mais abaixo.
 3. **Textos de baixa informação atraem perguntas fora do tema.** O melhor resultado para "receita de bolo de chocolate" foi `*****`. **Consequência:** a busca vai excluir `low_information` por padrão.
 
 Sobre os prefixos: numa comparação rápida com cinco perguntas, tirar o `query:` mudou de 1 a 4 dos 10 primeiros resultados, sem diferença na proporção de resultados com o sentimento esperado (40 de 50 nos dois casos). Cinco perguntas não permitem afirmar ganho nem perda. Por isso mantemos o protocolo recomendado pelo modelo, e a comparação entra na avaliação formal da busca, na fase 2.
+
+## Busca das evidências
+
+O módulo [src/retrieval.py](src/retrieval.py) recebe a pergunta e devolve as avaliações que servem de evidência para a resposta, ou informa que não há evidência suficiente. Ele aplica as consequências dos três achados da etapa anterior, em quatro passos:
+
+1. **Filtros.** O usuário pode filtrar por nota, sentimento, status da entrega, categoria e período. Se ele não escolher o sentimento, a busca tenta inferi-lo da pergunta.
+2. **Similaridade.** A pergunta vira embedding e o Chroma devolve os comentários mais próximos dentro dos filtros. Os textos de baixa informação ficam de fora por padrão (Achado 3).
+3. **Repetições.** Comentários iguais depois da normalização viram uma única evidência, que guarda quantas vezes o texto apareceu.
+4. **Corte de similaridade.** Evidências abaixo do corte são descartadas. Se nenhuma sobrar, a busca sinaliza que a pergunta deve ser recusada.
+
+Exemplo na base completa:
+
+| Pergunta | Filtro inferido | Resultado |
+| --- | --- | --- |
+| "quais as principais reclamações sobre entrega?" | sentimento negativo | 8 evidências, todas com nota 1: não entrega, pedido incompleto, produto mal embalado |
+| "não recebi o produto" | nenhum | 8 evidências. A primeira, "nao recebi o produto", aparece 98 vezes |
+| "qual a capital da França?" | nenhum | Nenhuma evidência (melhor similaridade 0,802, abaixo do corte de 0,84): pergunta recusada |
+
+### Decisões e alternativas avaliadas
+
+**Inferência do sentimento por regras, e só quando a pergunta pede um lado.** A busca procura, no texto normalizado, palavras com que a pergunta pede explicitamente reclamações ("reclamação", "problema", "queixa", "insatisfeito") ou elogios ("elogio", "positivo"). Se aparecerem os dois lados ("pontos positivos e negativos"), não há filtro.
+
+- **Perguntas de julgamento ficam sem filtro.** "Os clientes ficaram satisfeitos?" e "recomendariam a loja?" pedem os dois lados. Filtrar só os positivos levaria o sistema a responder "sim" com base apenas em quem disse sim. Por isso, palavras como "satisfeito", "ruim" e "recomenda" não ativam filtro.
+- **Alternativas:** pedir ao LLM que extraia os filtros da pergunta entende formulações mais variadas, mas acrescenta uma chamada paga e mais lenta a cada busca, e o resultado pode variar entre execuções. Um classificador treinado exigiria perguntas rotuladas, que não temos. As regras são transparentes, testáveis (11 casos em `tests/test_retrieval.py`) e erram para o lado seguro: na dúvida, não filtram. A extração pelo LLM fica como evolução para a fase 2.
+- **Filtros escolhidos pelo usuário têm prioridade.** Se ele escolher sentimento ou nota, nada é inferido.
+
+**Repetições agrupadas na hora da busca, e não na indexação.** Cada avaliação continua no índice com os próprios metadados. Na busca, os textos iguais depois da normalização viram uma evidência, com a contagem de repetições.
+
+- **Por quê:** o LLM recebe evidências variadas, em vez de oito cópias de "não recebi o produto", e o volume da queixa não se perde. Ele pode dizer "dezenas de clientes relatam não ter recebido o produto".
+- **Por que não na indexação:** cada cópia é de um cliente diferente, com nota, data e categoria próprias. Apagar as cópias distorceria os filtros e as contagens.
+- **Janela adaptativa:** a busca pede 4 vezes mais candidatos do que precisa. No teste com "não recebi o produto", as 30 cópias ocuparam quase toda a janela de 32 candidatos e sobraram só 3 evidências diferentes. Agora, quando isso acontece, a janela dobra (até 512 candidatos), até reunir as 8 evidências, até o último candidato já estar abaixo do corte ou até os documentos acabarem.
+- **Limitação:** a contagem considera só os candidatos buscados. É um piso, não o total da base. Variações com erro de digitação ("Nao recebino produto") também não são agrupadas. A contagem exata de cada tema fica para as análises quantitativas com DuckDB, na fase 2.
+
+### Calibração do corte de recusa
+
+O Achado 2 mostrou que as similaridades do E5 ficam numa faixa estreita, então o corte não pode ser escolhido "no olho". Ele foi calibrado com dados.
+
+**O experimento.** Montamos 60 perguntas em [data/eval/threshold_questions.csv](data/eval/threshold_questions.csv):
+- **30 dentro do tema**, com formulações variadas: entrega, defeito, atendimento, embalagem, pagamento, categorias específicas, elogios;
+- **26 fora do tema** (capital da França, imposto de renda, receita de bolo);
+- **4 armadilhas:** perguntas fora do tema que usam o vocabulário da base, como "como fazer uma reclamação no Procon?", "qual o horário de funcionamento dos Correios?" e "qual o faturamento anual da Olist?".
+
+Para cada pergunta, registramos a similaridade da melhor evidência, com os mesmos filtros do uso real. As perguntas foram divididas em duas metades, alternadamente dentro de cada grupo. O corte é escolhido numa metade (**calibração**) e conferido na outra (**validação**), que não participou da escolha. Para reproduzir:
+
+```bash
+python scripts/calibrate_threshold.py                                  # base completa
+python scripts/calibrate_threshold.py --persist-dir chroma_db_sample   # amostra
+```
+
+**O critério: o maior corte que não recusa nenhuma pergunta legítima.** Os dois erros possíveis não têm o mesmo custo:
+
+- **Aceite indevido** (pergunta fora do tema passa pelo corte): ainda tem conserto. A pergunta segue para o LLM, que recebe instruções para recusar quando as evidências não respondem a ela.
+- **Recusa indevida** (pergunta legítima barrada): não tem conserto. O LLM nem chega a ver a pergunta, e o usuário recebe "não encontrei avaliações" sobre um tema que está na base.
+
+O corte é a primeira de duas barreiras, e só o erro dele que não pode ser corrigido depois precisa ser zero.
+
+**Resultado.**
+
+| | Amostra (3.000) | Base completa (42.370) |
+| --- | --- | --- |
+| Similaridade, perguntas do tema (mín. / mediana / máx.) | 0,831 / 0,859 / 0,906 | 0,843 / 0,873 / 0,917 |
+| Similaridade, perguntas fora do tema (mín. / mediana / máx.) | 0,774 / 0,829 / 0,848 | 0,781 / 0,835 / 0,870 |
+| **Corte escolhido** | **0,83** | **0,84** |
+| Recusas indevidas (calibração / validação) | 0 / 0 | 0 / 0 |
+| Perguntas fora do tema barradas pelo corte | 15 de 30 | 18 de 30 |
+
+Para comparação, o corte de maior acerto, que trata os dois erros como iguais, seria 0,85 na base completa. Ele acerta 53 de 60, contra 48 de 60 do corte escolhido, mas recusa duas perguntas legítimas: "o que falam do tamanho das roupas?" e "o que dizem sobre móveis e decoração?". O acerto maior vem justamente do erro que não tem conserto.
+
+**O que a calibração mostrou:**
+
+1. **A similaridade sozinha não separa as perguntas.** As faixas se sobrepõem entre 0,843 e 0,870. As perguntas fora do tema que passam pelo corte são as armadilhas ("reclamação no Procon", 0,870, que encontrou "Vou fazer uma reclamação no Procon") e perguntas que coincidem com o pedido de algum cliente: "como trocar o óleo do carro?" (0,855) encontrou "Quero trocá-lo", e "como declarar imposto de renda?" (0,853) encontrou "Gostaria de saber como fazer". O embedding mede a proximidade entre os textos, não se o comentário responde à pergunta. **Consequência:** na Parte 2, o LLM é a segunda barreira, e não um detalhe. Das 30 perguntas fora do tema, 12 chegam até ele.
+2. **O corte depende do tamanho da base.** Com 14 vezes mais documentos, todas as similaridades sobem: a mediana fora do tema vai de 0,829 para 0,835. Quanto maior a base, maior a chance de existir algum comentário parecido com qualquer pergunta. Por isso o corte é 0,83 na amostra e 0,84 na base completa. O padrão do código é 0,84, porque é a base completa que o sistema usa nas análises. **Trocar ou ampliar a base exige recalibrar.**
+
+**Limitações.** As 60 perguntas foram escritas por nós, e perguntas reais de usuários podem ter outra distribuição. A margem é pequena: a pergunta legítima de menor similaridade na base completa ficou em 0,843, só 0,003 acima do corte. Por isso, as recusas devem ser acompanhadas no uso, e o conjunto de perguntas deve crescer na avaliação da fase 2.
 
 ## Testes
 
@@ -203,7 +277,7 @@ Sobre os prefixos: numa comparação rápida com cinco perguntas, tirar o `query
 pytest
 ```
 
-Os testes do índice usam um gerador de embeddings falso e determinístico, então rodam em segundos e sem baixar o modelo.
+Os testes do índice e da busca usam um gerador de embeddings falso e determinístico, então rodam em segundos e sem baixar o modelo.
 
 ## Licença dos dados
 

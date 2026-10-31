@@ -1,9 +1,13 @@
 """Gera os embeddings das avaliações e monta o índice vetorial no ChromaDB.
 
 Uso:
-    python scripts/build_index.py                       # amostra versionada (3.000 documentos)
-    python scripts/build_index.py --input data/processed/reviews_docs.parquet --reset   # base completa
+    python scripts/prepare_data.py     # gera data/processed/reviews_docs.parquet, se ainda não existir
+    python scripts/build_index.py      # base completa (42.370 documentos, cerca de 11 min na CPU)
 
+    # Índice só da amostra, usado pelo experimento de scripts/compare_search.py:
+    python scripts/build_index.py --input data/sample/reviews_sample.csv --persist-dir chroma_db_sample
+
+O padrão é a base completa porque o corte de recusa da busca (src/retrieval.py) foi calibrado nela.
 Na primeira execução, o modelo de embeddings (~1,1 GB) é baixado do Hugging Face e fica em cache.
 
 Saída:
@@ -27,7 +31,7 @@ from src.vector_store import DEFAULT_BATCH_SIZE, DEFAULT_COLLECTION, index_docum
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--input", type=Path, default=ROOT / "data" / "sample" / "reviews_sample.csv")
+    parser.add_argument("--input", type=Path, default=ROOT / "data" / "processed" / "reviews_docs.parquet")
     parser.add_argument("--persist-dir", type=Path, default=ROOT / "chroma_db")
     parser.add_argument("--collection", default=DEFAULT_COLLECTION)
     parser.add_argument("--model", default=DEFAULT_MODEL)
@@ -43,6 +47,8 @@ def fmt(n: int) -> str:
 
 def main() -> None:
     args = parse_args()
+    if not args.input.exists():
+        sys.exit(f"Arquivo não encontrado: {args.input}\nGere a base com: python scripts/prepare_data.py")
     docs = load_documents(args.input)
     print(f"Documentos lidos de {args.input.name}: {fmt(len(docs))}")
 

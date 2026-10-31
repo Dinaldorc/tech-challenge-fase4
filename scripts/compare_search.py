@@ -1,9 +1,9 @@
 """Compara a busca semântica (E5) com a busca lexical (BM25), com e sem filtro de sentimento.
 
-Reproduz o experimento do README ("Achado 1"). Usa a amostra versionada e o índice gerado por
-``scripts/build_index.py``, que precisa ser executado antes:
+Reproduz o experimento do README ("Achado 1"). As duas buscas rodam sobre a amostra versionada, então
+o E5 usa um índice só da amostra, que precisa ser gerado antes:
 
-    python scripts/build_index.py
+    python scripts/build_index.py --input data/sample/reviews_sample.csv --persist-dir chroma_db_sample
     python scripts/compare_search.py
     python scripts/compare_search.py --question "produto veio quebrado" --k 5
 
@@ -38,7 +38,7 @@ DEFAULT_PROBES = ["Demorou para entregar", "Atraso na entrega."]
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--input", type=Path, default=ROOT / "data" / "sample" / "reviews_sample.csv")
-    parser.add_argument("--persist-dir", type=Path, default=ROOT / "chroma_db")
+    parser.add_argument("--persist-dir", type=Path, default=ROOT / "chroma_db_sample")
     parser.add_argument("--question", default=DEFAULT_QUESTION)
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--probe", action="append", help="texto exato cuja posição será mostrada")

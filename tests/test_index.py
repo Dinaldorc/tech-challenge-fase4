@@ -1,4 +1,3 @@
-import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -14,30 +13,9 @@ from src.vector_store import (
     iter_batches,
     open_collection,
 )
+from tests.fakes import FakeEmbedder
 
 SAMPLE = Path(__file__).resolve().parents[1] / "data" / "sample" / "reviews_sample.csv"
-
-
-class FakeEmbedder:
-    """Vetores determinísticos a partir do hash do texto: testa o índice sem baixar o modelo."""
-
-    model_name = "fake-model"
-
-    def __init__(self, dimension: int = 8):
-        self.dimension = dimension
-        self.calls: list[list[str]] = []
-
-    def _vector(self, text: str) -> list[float]:
-        seed = int(hashlib.md5(text.encode()).hexdigest()[:8], 16)
-        vector = np.random.default_rng(seed).normal(size=self.dimension)
-        return (vector / np.linalg.norm(vector)).tolist()
-
-    def embed_documents(self, texts):
-        self.calls.append(list(texts))
-        return [self._vector(as_passage(text)) for text in texts]
-
-    def embed_query(self, text):
-        return self._vector(as_query(text))
 
 
 @pytest.fixture(scope="module")
@@ -143,7 +121,7 @@ def test_collection_uses_cosine_and_finds_same_text(tmp_path, docs):
     assert collection.configuration["hnsw"]["space"] == "cosine"
 
     target = docs.iloc[3]
-    result = collection.query(query_embeddings=[embedder._vector(as_passage(target["text"]))], n_results=1)
+    result = collection.query(query_embeddings=[embedder.vector(as_passage(target["text"]))], n_results=1)
     assert result["ids"][0][0] == target["review_id"]
     assert result["distances"][0][0] == pytest.approx(0.0, abs=1e-5)
 

@@ -1,0 +1,61 @@
+question,in_domain,kind
+quais as principais reclamações sobre entrega?,True,tema
+os clientes reclamam de produtos com defeito?,True,tema
+o que os clientes acham da embalagem?,True,tema
+tem reclamação de produto diferente do anunciado?,True,tema
+como os clientes avaliam o atendimento do vendedor?,True,tema
+quais elogios os clientes fazem sobre a qualidade dos produtos?,True,tema
+os produtos chegaram antes do prazo?,True,tema
+há reclamações sobre cobrança indevida ou problemas no pagamento?,True,tema
+o que dizem sobre móveis e decoração?,True,tema
+tem cliente que recebeu pedido incompleto?,True,tema
+o pessoal ficou satisfeito com o custo-benefício?,True,tema
+alguém reclamou que não conseguiu falar com a loja?,True,tema
+quais problemas aparecem nos relógios?,True,tema
+os clientes recomendariam a loja?,True,tema
+reclamações sobre troca ou devolução de produto,True,tema
+o produto veio quebrado?,True,tema
+comentários sobre a nota fiscal,True,tema
+os clientes reclamam do rastreamento do pedido?,True,tema
+o que falam do tamanho das roupas?,True,tema
+clientes que compraram dois produtos e só receberam um,True,tema
+qual a percepção sobre a rapidez da entrega?,True,tema
+tem reclamação de produto falsificado ou não original?,True,tema
+opiniões sobre o site e a experiência de compra,True,tema
+os clientes gostaram dos produtos de beleza e perfumaria?,True,tema
+alguém comentou sobre o frete caro?,True,tema
+cliente insatisfeito com a cor do produto,True,tema
+problemas com a montagem dos móveis,True,tema
+o que dizem sobre eletrônicos que pararam de funcionar?,True,tema
+os compradores elogiam o vendedor?,True,tema
+tem relato de entrega no endereço errado?,True,tema
+qual a capital da França?,False,fora
+como declarar imposto de renda?,False,fora
+receita de bolo de chocolate,False,fora
+quem ganhou a copa do mundo de 2002?,False,fora
+qual a fórmula de Bhaskara?,False,fora
+me explique a teoria da relatividade,False,fora
+qual a previsão do tempo para amanhã em São Paulo?,False,fora
+como trocar o óleo do carro?,False,fora
+qual o melhor time de futebol do Brasil?,False,fora
+escreva um poema sobre o mar,False,fora
+como funciona a fotossíntese?,False,fora
+qual a cotação do dólar hoje?,False,fora
+quantos habitantes tem o Japão?,False,fora
+como aprender a programar em Python?,False,fora
+quais os sintomas da dengue?,False,fora
+qual o faturamento anual da Olist?,False,armadilha
+qual o salário de um engenheiro de dados?,False,fora
+como fazer uma reclamação no Procon?,False,armadilha
+qual o horário de funcionamento dos Correios?,False,armadilha
+quem é o presidente do Brasil?,False,fora
+traduza bom dia para o inglês,False,fora
+qual a distância da Terra à Lua?,False,fora
+como cuidar de uma planta suculenta?,False,fora
+qual a história do Império Romano?,False,fora
+me recomende um filme de ação,False,fora
+como funciona o algoritmo quicksort?,False,fora
+qual o melhor plano de celular?,False,armadilha
+o que é inflação?,False,fora
+quanto custa uma passagem para Lisboa?,False,fora
+dicas para uma entrevista de emprego,False,fora
