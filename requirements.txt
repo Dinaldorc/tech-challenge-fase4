@@ -9,7 +9,7 @@ notebook>=7.0
 ipykernel>=6.29
 
 # Embeddings e indice vetorial
-sentence-transformers>=5.0,<6
+sentence-transformers>=5.0,<7
 chromadb>=1.5,<2
 rank-bm25>=0.2.2  # linha de base lexical (scripts/compare_search.py)
 
