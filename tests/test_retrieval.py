@@ -11,6 +11,7 @@ from src.retrieval import (
     build_where,
     deduplicate,
     infer_sentiment,
+    parse_filters,
 )
 from src.vector_store import index_documents, open_collection
 from tests.fakes import FakeEmbedder
@@ -177,3 +178,18 @@ def test_search_widens_window_when_repetitions_fill_it(tmp_path):
     assert len(result.evidences) == 3
     assert result.evidences[0].text == "Não recebi o produto"
     assert result.evidences[0].mentions == 40
+
+
+# ---- Filtros escritos como texto ---------------------------------------------------------------
+
+
+def test_parse_filters():
+    filters = parse_filters("categoria=moveis_decoracao, beleza_saude; nota=1,2; entrega=atrasado; de=2018-01-01")
+    assert filters.categories == ("moveis_decoracao", "beleza_saude")
+    assert filters.review_scores == (1, 2)
+    assert filters.delivery_statuses == ("atrasado",)
+    assert filters.date_from == date(2018, 1, 1)
+    assert parse_filters("") == SearchFilters()
+    assert parse_filters(None) == SearchFilters()
+    with pytest.raises(ValueError):
+        parse_filters("cor=azul")

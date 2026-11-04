@@ -163,8 +163,10 @@ def show_answer(response: RagResponse) -> None:
             evidence_card(numbers[id(evidence)], evidence)
     else:
         st.info(f"**{response.answer}**\n\nRecusada {REFUSAL_STAGE.get(response.refused_at, '')}.")
-        if response.refusal_reason and response.refused_at == "llm":
+        if response.refused_at == "llm":
             st.caption(f"Justificativa do modelo: {response.refusal_reason}")
+        elif response.refusal_reason:
+            st.caption(response.refusal_reason)
 
 
 # ---- Como a resposta foi construída ------------------------------------------------------------
@@ -182,8 +184,9 @@ def show_pipeline(response: RagResponse, chosen: SearchFilters) -> None:
             if inferred:
                 st.caption(f"O sentimento '{', '.join(retrieval.filters.sentiments)}' foi inferido da pergunta.")
             st.markdown(
-                "Os textos de baixa informação (\"ok\", \".\") ficam de fora. A pergunta é convertida em embedding "
-                "pelo modelo `multilingual-e5-base`, com o prefixo `query:`."
+                "**Regras fixas da busca** (valem para toda pergunta): comentários sem conteúdo dos clientes "
+                "(\"ok\", \".\", \"*****\") não são pesquisados. A pergunta é convertida em embedding pelo modelo "
+                "`multilingual-e5-base`, com o prefixo `query:`."
             )
 
         with steps[1]:
@@ -222,6 +225,8 @@ def show_pipeline(response: RagResponse, chosen: SearchFilters) -> None:
                 st.markdown(f"Respondida, com {len(response.citations)} avaliações citadas, todas conferidas.")
             else:
                 st.markdown(f"Recusada {REFUSAL_STAGE.get(response.refused_at, '')}.")
+                if response.refusal_reason:
+                    st.markdown(f"Motivo: {response.refusal_reason}")
             if response.model:
                 st.caption(f"Modelo: {response.model} · tokens: {response.input_tokens} de entrada + "
                            f"{response.output_tokens} de saída")
@@ -269,7 +274,7 @@ def main() -> None:
     response: RagResponse | None = st.session_state.get("response")
     if response is None:
         return
-    if asks_for_frequency(response.question):
+    if response.answered and asks_for_frequency(response.question):
         st.warning(
             "Esta pergunta pede frequência ou proporção. A busca traz os comentários mais parecidos com a "
             "pergunta, e não uma amostra representativa: a resposta mostra exemplos, não um ranking. "

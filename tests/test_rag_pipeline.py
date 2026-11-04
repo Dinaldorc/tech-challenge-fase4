@@ -2,6 +2,7 @@ import pytest
 
 from src.llm import LLMOutput, OpenAIClient, RagAnswer
 from src.rag_pipeline import (
+    FREQUENCY_NOTE,
     REFUSAL_MESSAGE,
     SYSTEM_PROMPT,
     RagPipeline,
@@ -9,6 +10,7 @@ from src.rag_pipeline import (
     build_user_prompt,
     check_citations,
     format_evidence,
+    search_refusal_reason,
 )
 from src.retrieval import Evidence, RetrievalResult, SearchFilters
 
@@ -153,3 +155,20 @@ def test_response_keeps_prompt_and_retrieval_keeps_candidates():
     response = RagPipeline(StubRetriever(EVIDENCES), llm).ask("reclamações?")
     assert response.user_prompt == llm.prompts[0][1]
     assert RagPipeline(StubRetriever([]), llm).ask("x").user_prompt == ""
+
+
+def test_frequency_question_gets_note_in_prompt():
+    result = RetrievalResult("p", SearchFilters(), 0.82, EVIDENCES, 0.9)
+    frequency = build_user_prompt("Quais reclamações aparecem com maior frequência?", result)
+    regular = build_user_prompt("Quais as principais reclamações?", result)
+    assert FREQUENCY_NOTE in frequency
+    assert FREQUENCY_NOTE not in regular
+
+
+def test_search_refusal_reason_explains_with_numbers():
+    below = RetrievalResult("p", SearchFilters(), 0.82, [], 0.788)
+    assert search_refusal_reason(below) == (
+        "A avaliação mais parecida com a pergunta teve similaridade 0,788, abaixo do corte de 0,82."
+    )
+    empty = RetrievalResult("p", SearchFilters(categories=("x",)), 0.82, [], None)
+    assert "filtros" in search_refusal_reason(empty)

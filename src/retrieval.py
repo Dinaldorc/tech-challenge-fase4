@@ -28,10 +28,11 @@ import chromadb
 from src.embeddings import Embedder
 from src.preprocessing import normalize_for_comparison
 
-# Calibrado na base completa (42.370 documentos) com scripts/calibrate_threshold.py: o maior corte
-# que não recusa nenhuma pergunta legítima. Na amostra de 3.000, o mesmo critério dá 0,83, porque as
-# similaridades sobem com o tamanho da base. Trocar a base exige recalibrar (README, "Busca").
-DEFAULT_MIN_SIMILARITY = 0.84
+# Calibrado na base completa (42.370 documentos) com scripts/calibrate_threshold.py, com 82 perguntas
+# específicas e genéricas, com e sem filtros: o maior corte que não recusa nenhuma pergunta legítima
+# (0,825), menos uma margem de segurança de 0,005. Na amostra de 3.000, o mesmo critério dá 0,805,
+# porque as similaridades sobem com o tamanho da base. Trocar a base exige recalibrar (README, "Busca").
+DEFAULT_MIN_SIMILARITY = 0.82
 DEFAULT_K = 8
 # Busca mais candidatos do que o necessário para sobrar k evidências depois de juntar as repetidas.
 # Se as repetições consumirem a janela ("não recebi o produto" aparece 30 vezes), ela dobra até o
@@ -58,6 +59,34 @@ class SearchFilters:
     date_from: date | None = None
     date_to: date | None = None
     include_low_information: bool = False
+
+
+def parse_filters(spec: str | None) -> SearchFilters:
+    """Lê filtros escritos como texto, usados nos conjuntos de avaliação.
+
+    Formato: ``campo=valor1,valor2;campo=valor``. Campos: ``sentimento``, ``nota``, ``entrega``,
+    ``categoria``, ``de`` e ``ate`` (datas AAAA-MM-DD). Texto vazio significa "sem filtro".
+    """
+    fields: dict = {}
+    for part in filter(None, (piece.strip() for piece in (spec or "").split(";"))):
+        name, _, raw = part.partition("=")
+        values = tuple(v.strip() for v in raw.split(",") if v.strip())
+        name = name.strip()
+        if name == "sentimento":
+            fields["sentiments"] = values
+        elif name == "nota":
+            fields["review_scores"] = tuple(int(v) for v in values)
+        elif name == "entrega":
+            fields["delivery_statuses"] = values
+        elif name == "categoria":
+            fields["categories"] = values
+        elif name == "de":
+            fields["date_from"] = date.fromisoformat(values[0])
+        elif name == "ate":
+            fields["date_to"] = date.fromisoformat(values[0])
+        else:
+            raise ValueError(f"Filtro desconhecido: {name!r}")
+    return SearchFilters(**fields)
 
 
 def infer_sentiment(question: str) -> tuple[str, ...] | None:
