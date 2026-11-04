@@ -113,10 +113,21 @@ def format_evidence(number: int, evidence: Evidence) -> str:
     return f'[{number}] ({" | ".join(details)})\n"{text}"'
 
 
+FREQUENCY_NOTE = (
+    "Atenção: a pergunta pede frequência, proporção ou ranking. Você recebeu apenas exemplos escolhidos "
+    "por semelhança com a pergunta, e não uma contagem. Apresente os tipos de situação que aparecem nas "
+    "avaliações, sem ordená-los por frequência e sem usar expressões como \"mais frequente\", \"a maioria\" "
+    "ou \"principal\". Termine dizendo, em uma frase, que medir a frequência exige contar as avaliações da "
+    "base inteira."
+)
+
+
 def build_user_prompt(question: str, retrieval: RetrievalResult) -> str:
     evidences = "\n\n".join(format_evidence(i, e) for i, e in enumerate(retrieval.evidences, 1))
+    note = f"{FREQUENCY_NOTE}\n\n" if asks_for_frequency(question) else ""
     return (
         f"Pergunta: {question}\n\n"
+        f"{note}"
         f"Filtros aplicados na busca: {describe_filters(retrieval.filters)}\n\n"
         f"Avaliações encontradas ({len(retrieval.evidences)}):\n\n{evidences}"
     )
@@ -128,6 +139,14 @@ def check_citations(answer: str, cited: list[int], total: int) -> tuple[list[int
     valid = [n for n in dict.fromkeys(numbers) if 1 <= n <= total]
     invalid = tuple(sorted({n for n in numbers if not 1 <= n <= total}))
     return valid, invalid
+
+
+def search_refusal_reason(retrieval: RetrievalResult) -> str:
+    cut = f"{retrieval.min_similarity:.3f}".rstrip("0").replace(".", ",")
+    if retrieval.best_similarity is None:
+        return "Nenhuma avaliação atende aos filtros escolhidos."
+    best = f"{retrieval.best_similarity:.3f}".replace(".", ",")
+    return f"A avaliação mais parecida com a pergunta teve similaridade {best}, abaixo do corte de {cut}."
 
 
 class RagPipeline:
@@ -145,7 +164,7 @@ class RagPipeline:
         retrieval = self.retriever.search(question, k=k, filters=filters, infer_filters=infer_filters)
         if not retrieval.has_evidence:
             return RagResponse(question, False, REFUSAL_MESSAGE, retrieval, refused_at="busca",
-                               refusal_reason="Nenhuma avaliação acima do corte de similaridade.")
+                               refusal_reason=search_refusal_reason(retrieval))
 
         user_prompt = build_user_prompt(question, retrieval)
         output = self.llm.generate(SYSTEM_PROMPT, user_prompt)
