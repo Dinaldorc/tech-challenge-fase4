@@ -125,6 +125,8 @@ class RetrievalResult:
     min_similarity: float
     evidences: list[Evidence] = field(default_factory=list)
     best_similarity: float | None = None  # do melhor candidato, mesmo abaixo do corte
+    # Candidatos já agrupados, inclusive os abaixo do corte: servem para mostrar a seleção na interface.
+    candidates: list[Evidence] = field(default_factory=list)
 
     @property
     def has_evidence(self) -> bool:
@@ -171,7 +173,8 @@ class Retriever:
         n_results = k * CANDIDATE_FACTOR
         while True:
             candidates = self._query(query_vector, n_results, where)
-            evidences = [e for e in deduplicate(candidates) if e.similarity >= self.min_similarity]
+            grouped = deduplicate(candidates)
+            evidences = [e for e in grouped if e.similarity >= self.min_similarity]
             exhausted = len(candidates) < n_results
             below_cut = bool(candidates) and candidates[-1].similarity < self.min_similarity
             if len(evidences) >= k or exhausted or below_cut or n_results >= MAX_CANDIDATES:
@@ -179,7 +182,7 @@ class Retriever:
             n_results = min(n_results * 2, MAX_CANDIDATES)
 
         best = candidates[0].similarity if candidates else None
-        return RetrievalResult(question, filters, self.min_similarity, evidences[:k], best)
+        return RetrievalResult(question, filters, self.min_similarity, evidences[:k], best, grouped)
 
     def _query(self, query_vector: list[float], n_results: int, where: dict | None) -> list[Evidence]:
         response = self.collection.query(query_embeddings=[query_vector], n_results=n_results, where=where)
