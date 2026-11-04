@@ -23,6 +23,7 @@ import re
 from dataclasses import dataclass, field
 
 from src.llm import LLMClient
+from src.preprocessing import normalize_for_comparison
 from src.retrieval import DEFAULT_K, Evidence, RetrievalResult, Retriever, SearchFilters
 
 REFUSAL_MESSAGE = "Não encontrei avaliações de clientes que permitam responder a essa pergunta."
@@ -55,6 +56,17 @@ as avaliações por tema.
 
 CITATION = re.compile(r"\[(\d+)\]")
 
+# Perguntas que pedem contagem ou proporção ("com maior frequência", "quantos", "a maioria").
+# A busca semântica traz os comentários mais parecidos com a pergunta, e não uma amostra
+# representativa: ela mostra exemplos, mas não mede frequência (README, "Resposta com o LLM").
+FREQUENCY_INTENT = re.compile(
+    r"\b(frequen\w*|mais comu\w*|quant[oa]s|porcentag\w*|percentua\w*|proporc\w*|maioria|ranking)\b"
+)
+
+
+def asks_for_frequency(question: str) -> bool:
+    return bool(FREQUENCY_INTENT.search(normalize_for_comparison(question)))
+
 
 @dataclass(frozen=True)
 class RagResponse:
@@ -69,6 +81,7 @@ class RagResponse:
     model: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
+    user_prompt: str = ""  # contexto enviado ao LLM (vazio se a busca recusou)
 
 
 def describe_filters(filters: SearchFilters) -> str:
@@ -134,9 +147,11 @@ class RagPipeline:
             return RagResponse(question, False, REFUSAL_MESSAGE, retrieval, refused_at="busca",
                                refusal_reason="Nenhuma avaliação acima do corte de similaridade.")
 
-        output = self.llm.generate(SYSTEM_PROMPT, build_user_prompt(question, retrieval))
+        user_prompt = build_user_prompt(question, retrieval)
+        output = self.llm.generate(SYSTEM_PROMPT, user_prompt)
         parsed = output.parsed
-        usage = {"model": output.model, "input_tokens": output.input_tokens, "output_tokens": output.output_tokens}
+        usage = {"model": output.model, "input_tokens": output.input_tokens,
+                 "output_tokens": output.output_tokens, "user_prompt": user_prompt}
 
         if not parsed.answered:
             return RagResponse(question, False, REFUSAL_MESSAGE, retrieval, refused_at="llm",

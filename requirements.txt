@@ -17,5 +17,8 @@ rank-bm25>=0.2.2  # linha de base lexical (scripts/compare_search.py)
 openai>=3.0,<4
 python-dotenv>=1.0
 
+# Interface
+streamlit>=1.66,<2
+
 # Testes
 pytest>=8.0

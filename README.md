@@ -365,6 +365,47 @@ python scripts/evaluate_rag.py
 
 **Limitações.** A avaliação confere se as citações **existem**, não se cada uma **sustenta** a afirmação a que está ligada. Essa verificação foi feita lendo uma amostra das respostas. Automatizá-la, com um segundo modelo atuando como avaliador (*LLM-as-a-judge*) e métricas de fidelidade às evidências, fica para a fase 2, junto com um conjunto maior de perguntas.
 
+## Interface
+
+A interface em Streamlit ([app.py](app.py)) é o ponto de entrada para gestores e analistas:
+
+```bash
+streamlit run app.py
+```
+
+Ela requer o índice (`python scripts/build_index.py`) e a chave no `.env`. A tela tem três partes:
+
+1. **Pergunta.** Campo livre e seis perguntas de exemplo em botões. Cinco delas vêm do enunciado do desafio ("Quais são os principais problemas relatados pelos clientes?", "O que os clientes relatam sobre problemas relacionados à entrega?" etc.), e a sexta, "Qual a capital da França?", demonstra a recusa.
+2. **Resposta e evidências.** A resposta com as citações [n] e, abaixo, um cartão para cada avaliação citada: nota em estrelas, categoria, status e dias de atraso da entrega, data, número mínimo de cópias do mesmo texto, texto original e `review_id`. Quando a pergunta é recusada, a tela informa em qual barreira isso aconteceu.
+3. **"Como a resposta foi construída".** Uma seção expansível, com uma aba para cada etapa do pipeline:
+
+| Aba | O que mostra |
+| --- | --- |
+| 1. Pergunta e filtros | A pergunta, os filtros escolhidos e o sentimento inferido, quando houver |
+| 2. Recuperação | O corte de similaridade, a melhor similaridade e a tabela dos candidatos, cada um marcado como "enviada ao LLM", "acima do corte, fora do limite" ou "abaixo do corte" |
+| 3. Contexto enviado ao LLM | As instruções do sistema e a mensagem exata com a pergunta e as avaliações numeradas |
+| 4. Decisão | Se respondeu ou recusou (e em qual barreira), o modelo e os tokens usados |
+
+### Decisões
+
+**A tela mostra o pipeline por dentro, e não só a resposta.** O desafio pede que a solução demonstre a transformação da pergunta, a recuperação, a seleção dos conteúdos, a construção do contexto e a geração da resposta, além da rastreabilidade de cada insight. As quatro abas cobrem exatamente essas etapas. Para quem usa o sistema no dia a dia, elas servem de auditoria: é possível ver por que uma avaliação entrou e outra ficou de fora.
+
+**Filtros de metadados na barra lateral:** sentimento, nota, categoria, status da entrega e período. Eles atendem ao desafio adicional do enunciado e contribuem para a qualidade da recuperação de duas formas. Primeiro, corrigem a confusão de polaridade do embedding: com o filtro de sentimento negativo, uma busca sobre prazo passa de 2 para 10 resultados relevantes em 10 (Achado 1). Segundo, permitem perguntas que o texto sozinho não resolve, como "o que os clientes reclamam de móveis em 2018?", em que a categoria e o período vêm dos dados do pedido, e não do comentário.
+
+**Aviso nas perguntas de frequência.** Duas perguntas de exemplo do próprio enunciado pedem frequência ("quais reclamações aparecem com **maior frequência**?"). A busca semântica traz os comentários mais parecidos com a pergunta, e não uma amostra representativa (ver "Resposta com o LLM"). Quando a pergunta pede contagem, proporção ou ranking, a tela avisa que a resposta mostra exemplos, e não um ranking. As análises quantitativas, previstas para a fase 2, resolvem essas perguntas.
+
+**Os números da tela não são frequências, e os rótulos dizem isso.** Medimos a diferença com a queixa mais repetida da base:
+
+| O que a tela mostra | O que existe na base |
+| --- | --- |
+| "ao menos 98 avaliações com este mesmo texto" (cópias de "não recebi o produto" encontradas pela busca) | 107 avaliações com exatamente esse texto |
+| | 2.127 avaliações que falam em não recebimento com outras palavras ("ainda não recebi meu pedido"...), 19,6% das 10.861 negativas |
+| "Evidências usadas na resposta (8)" | Depende do limite de evidências na barra lateral, e não do assunto |
+
+A busca conta só as cópias exatas que caíram na janela de candidatos, e o número de evidências é uma configuração. Para que nada disso seja lido como frequência, a tela escreve "ao menos N", explica abaixo do título das evidências o que o número significa e repete esse exemplo no aviso das perguntas de frequência. O dado de negócio ("19,6% das reclamações falam de não recebimento") exige contar sobre a base inteira.
+
+**Modelo e índice carregados uma vez.** O modelo de embeddings (1,1 GB) e o índice ficam em cache durante a sessão (`st.cache_resource`). Só a primeira pergunta espera o carregamento. Os metadados para os filtros são lidos do índice em lotes de 5.000, porque pedir as 42 mil avaliações de uma vez estoura o limite de variáveis do SQLite que o Chroma usa internamente.
+
 ## Testes
 
 ```bash

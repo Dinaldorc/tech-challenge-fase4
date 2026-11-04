@@ -5,6 +5,7 @@ from src.rag_pipeline import (
     REFUSAL_MESSAGE,
     SYSTEM_PROMPT,
     RagPipeline,
+    asks_for_frequency,
     build_user_prompt,
     check_citations,
     format_evidence,
@@ -130,3 +131,25 @@ def test_openai_client_requires_api_key(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "")  # vazio, e o .env não sobrescreve variáveis já definidas
     with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
         OpenAIClient()
+
+
+@pytest.mark.parametrize(
+    ("question", "expected"),
+    [
+        ("Quais reclamações relacionadas à entrega aparecem com maior frequência?", True),
+        ("quais os problemas mais comuns?", True),
+        ("Quantos clientes recomendam a loja?", True),
+        ("qual a proporção de insatisfeitos?", True),
+        ("Quais são os principais problemas relatados pelos clientes?", False),
+        ("o que os clientes elogiam?", False),
+    ],
+)
+def test_asks_for_frequency(question, expected):
+    assert asks_for_frequency(question) is expected
+
+
+def test_response_keeps_prompt_and_retrieval_keeps_candidates():
+    llm = FakeLLM(answer("Atraso [1].", [1]))
+    response = RagPipeline(StubRetriever(EVIDENCES), llm).ask("reclamações?")
+    assert response.user_prompt == llm.prompts[0][1]
+    assert RagPipeline(StubRetriever([]), llm).ask("x").user_prompt == ""

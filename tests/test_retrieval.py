@@ -150,6 +150,7 @@ def test_threshold_removes_weak_evidence_and_signals_refusal(retriever):
 
     unrelated = retriever.search("qual a capital da França?", k=3, infer_filters=False)
     assert not unrelated.has_evidence
+    assert unrelated.candidates, "os candidatos abaixo do corte continuam disponíveis para a interface"
     assert unrelated.best_similarity is not None and unrelated.best_similarity < 0.999
 
 
