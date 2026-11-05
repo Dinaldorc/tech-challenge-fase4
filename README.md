@@ -1,7 +1,229 @@
-# tech-challenge-fase4
-Construir um sistema RAG sobre as avaliações da Olist. Ele recebe perguntas em linguagem natural, como "quais as principais reclamações sobre entrega?", e responde com base nos comentários reais dos clientes.
+# Voice of Customer Intelligence com RAG: avaliações da Olist
 
-O enunciado do desafio está em [docs/](docs/).
+Tech Challenge da Fase 4 da Pós Tech FIAP. O enunciado está em [docs/](docs/).
+
+**O problema.** Empresas de e-commerce recebem milhares de avaliações escritas, e é nelas que estão os motivos de insatisfação, os elogios e os padrões da experiência de compra. A nota resume a satisfação, mas não explica o porquê, e ler os comentários manualmente não escala.
+
+**A solução.** Um sistema de *Retrieval-Augmented Generation* (RAG) que permite a gestores e analistas perguntar em linguagem natural, como "quais são os principais problemas relatados pelos clientes?", e receber uma resposta construída **apenas** a partir das avaliações reais, com a citação de cada uma. Quando a base não tem evidência para responder, o sistema recusa, em vez de inventar.
+
+**Em números:**
+
+- 42.370 avaliações com texto, do [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce), indexadas por significado com o modelo `multilingual-e5-base`;
+- três barreiras contra respostas sem base: o corte de similaridade da busca, o julgamento do LLM e a conferência das citações;
+- na avaliação com 82 perguntas: 45 das 46 perguntas legítimas respondidas, 36 das 36 perguntas fora do tema recusadas, nenhuma citação inexistente e nenhuma obediência a uma instrução maliciosa escondida num comentário.
+
+## Sumário
+
+- [Como executar](#como-executar)
+- [Exemplos de perguntas e respostas](#exemplos-de-perguntas-e-respostas)
+- [Arquitetura](#arquitetura)
+- [Tecnologias e bibliotecas](#tecnologias-e-bibliotecas)
+- [Estrutura do repositório](#estrutura-do-repositório)
+- [Como o projeto foi construído](#como-o-projeto-foi-construído)
+- Decisões técnicas por etapa: [Dados](#dados) · [Análise exploratória](#análise-exploratória) · [Preparo da base](#preparo-da-base-de-documentos) · [Embeddings e índice](#embeddings-e-índice-vetorial) · [Busca](#busca-das-evidências) · [Resposta com o LLM](#resposta-com-o-llm) · [Interface](#interface)
+- [Limitações e próximos passos](#limitações-e-próximos-passos)
+- [Testes](#testes)
+
+## Como executar
+
+**Pré-requisitos:** Python 3.11, cerca de 3 GB livres em disco (bibliotecas, modelo de embeddings e índice) e uma chave da API da OpenAI.
+
+```bash
+# 1. Clonar o repositório
+git clone https://github.com/Dinaldorc/tech-challenge-fase4.git
+cd tech-challenge-fase4
+
+# 2. Criar e ativar o ambiente virtual
+python -m venv .venv
+.venv\Scripts\activate            # Windows (PowerShell)
+source .venv/bin/activate         # Linux/macOS
+
+# 3. Instalar as dependências (alguns minutos: inclui o PyTorch)
+pip install -r requirements.txt
+
+# 4. Configurar a chave da OpenAI: copiar o modelo e preencher OPENAI_API_KEY
+cp .env.example .env              # Windows: copy .env.example .env
+
+# 5. Preparar a base de documentos (cerca de 5 s)
+python scripts/prepare_data.py
+
+# 6. Gerar os embeddings e o índice (cerca de 11 min na CPU; na primeira vez, baixa o modelo de 1,1 GB)
+python scripts/build_index.py
+
+# 7. Abrir a interface
+streamlit run app.py
+```
+
+A interface abre no navegador, em `http://localhost:8501`. A primeira pergunta leva cerca de 20 segundos, enquanto o modelo de embeddings carrega; as seguintes, poucos segundos. Também é possível perguntar pelo terminal:
+
+```bash
+python scripts/ask.py "quais as principais reclamações sobre entrega?"
+python scripts/ask.py "quais as principais reclamações?" --category moveis_decoracao
+```
+
+**Reproduzir os experimentos.** Todos os números da documentação vêm de scripts versionados:
+
+| Experimento | Comando | Observação |
+| --- | --- | --- |
+| Testes automatizados | `pytest` | Segundos, sem modelo e sem API |
+| E5 × BM25 (Achado 1) | `python scripts/build_index.py --input data/sample/reviews_sample.csv --persist-dir chroma_db_sample` e depois `python scripts/compare_search.py` | Usa o índice da amostra, em menos de 1 min |
+| Calibração do corte de recusa | `python scripts/calibrate_threshold.py` | Sem custo de API |
+| Avaliação do fluxo completo | `python scripts/evaluate_rag.py` | Chama a OpenAI: cerca de 150 chamadas, poucos centavos de dólar. As respostas já estão em [data/eval/rag_results.csv](data/eval/rag_results.csv) |
+| Análise exploratória | `jupyter notebook notebooks/01_eda_avaliacoes.ipynb` | O notebook está salvo com as saídas e pode ser lido direto no GitHub |
+
+## Exemplos de perguntas e respostas
+
+Respostas reais do sistema, com o modelo `gpt-4.1-mini`, sobre a base completa. As citações foram encurtadas aqui; na interface, cada uma aparece num cartão com o texto completo, a nota, a categoria, a entrega e a data.
+
+**1. Investigação de reclamações**, pergunta do enunciado, sem filtro. O sistema inferiu o sentimento negativo pela palavra "problemas".
+
+> **Quais são os principais problemas relatados pelos clientes?**
+>
+> As avaliações negativas indicam que os principais problemas relatados pelos clientes são: entrega incompleta ou não realizada, com produtos que constam como entregues mas não foram recebidos, ou pedidos cancelados por indisponibilidade [1][4][7]; atrasos significativos na entrega, chegando a até 14 dias de atraso [2][3][5][8]; falta de consideração, atenção e respeito no atendimento ao cliente, incluindo dificuldade de contato e diálogo com o vendedor [2][3][4][5][8]; envio de produtos errados, indicando falhas na conferência dos pedidos [6].
+>
+> [1] ★☆☆☆☆ cool stuff: "Em partes. Sou cliente há anos, porém sempre há divergências e problemas na entrega, consta como produto entregue, porém foi entregue apenas 1 produto..."
+> [6] ★★☆☆☆ esporte lazer: "Como podem mandar um produto errado? Não existe conferências? Loja falha"
+
+**2. Busca por experiências positivas**, pergunta do enunciado. O sentimento positivo foi inferido pela palavra "elogiados". Mesmo com a regra contra generalizar, o modelo escreveu "menções frequentes" com base em 8 avaliações: a regra reduz esse risco, mas não o elimina (ver [Avaliação e escolha do modelo](#avaliação-e-escolha-do-modelo)).
+
+> **Quais aspectos da experiência de compra são mais elogiados pelos clientes?**
+>
+> As avaliações positivas destacam principalmente a entrega no prazo ou antes do prazo como um aspecto muito elogiado da experiência de compra, com menções frequentes à rapidez e pontualidade na entrega [2][3][4][5][7][8]. Além disso, a qualidade dos produtos é ressaltada, com clientes mencionando produtos originais, de excelente qualidade e que correspondem ao anúncio [1][3][4][6]. O atendimento e a negociação segura também são citados positivamente, assim como a satisfação geral com a compra e a recomendação da loja [2][5][7][8].
+>
+> [3] ★★★★★ perfumaria: "Produto original+Preço justo+Entrega rápida = cliente satisfeito."
+
+**3. Filtro por categoria** (desafio adicional): pergunta genérica com a categoria móveis e decoração escolhida na barra lateral.
+
+> **Quais as principais reclamações?** (categoria: móveis e decoração)
+>
+> As principais reclamações nas avaliações encontradas são relacionadas à não entrega dos produtos, com clientes relatando que não receberam seus pedidos mesmo após o pagamento [1][2][4]. Além disso, há reclamação sobre produto com defeito, especificamente um item furado, com pedido de devolução do dinheiro [3].
+>
+> [2] ★☆☆☆☆ móveis decoração, enviado e não recebido: "Ainda não recebi. Já paguei! Absurdo! Falta de consideração pelo consumidor ... Procon"
+
+Esta pergunta era recusada antes da recalibração do corte (ver [Calibração do corte de recusa](#calibração-do-corte-de-recusa)).
+
+**4. Pergunta de frequência**, do enunciado. A tela avisa que a busca traz exemplos, e não uma contagem, e o LLM não ordena os temas.
+
+> **Quais reclamações relacionadas à entrega aparecem com maior frequência?**
+>
+> As avaliações relatam reclamações relacionadas a atrasos na entrega, com menções específicas a atrasos de vários dias e demora geral na entrega [1][2][3][5][6][7]. Também há queixas sobre falta de comunicação e confirmação do pedido, gerando dúvidas se o produto será entregue [4]. (...) Medir a frequência exata dessas reclamações exige contar todas as avaliações da base inteira.
+>
+> [2] ★☆☆☆☆ cama mesa banho, atrasado: "Muita demora na entrega" (ao menos 8 avaliações com este mesmo texto)
+
+**5. Recusa pelo LLM**: a pergunta passa pela busca porque um comentário se parece com ela, mas as avaliações não a respondem.
+
+> **Como trocar o óleo do carro?**
+>
+> Não encontrei avaliações de clientes que permitam responder a essa pergunta.
+>
+> Justificativa do modelo: "As avaliações fornecidas não contêm informações sobre como trocar o óleo do carro; elas tratam apenas de trocas de produtos adquiridos."
+
+**6. Recusa na busca**, sem chamar o LLM.
+
+> **Qual a capital da França?**
+>
+> Não encontrei avaliações de clientes que permitam responder a essa pergunta.
+>
+> Motivo: a avaliação mais parecida com a pergunta teve similaridade 0,788, abaixo do corte de 0,82.
+
+**Um limite que os exemplos também mostram.** Com o filtro de entrega atrasada, a pergunta "Quais temas aparecem nas avaliações?" trouxe sobretudo comentários sobre o próprio ato de avaliar ("Avaliar o quê se ainda não recebi o produto?"). A palavra "avaliações" na pergunta aproximou a busca de comentários que falam em "avaliar". Perguntas genéricas funcionam melhor quando nomeiam o que se procura ("quais reclamações...", "o que os clientes elogiam...").
+
+## Arquitetura
+
+```mermaid
+flowchart LR
+    Q["Pergunta<br/>+ filtros"] --> E["Embedding da pergunta<br/>(E5)"]
+    E --> R["Busca no ChromaDB<br/>filtros + similaridade"]
+    R --> B1{"similaridade<br/>≥ 0,82?"}
+    B1 -- não --> X["Recusa"]
+    B1 -- sim --> C["Contexto:<br/>até 8 avaliações<br/>numeradas"]
+    C --> L["LLM<br/>gpt-4.1-mini"]
+    L --> B2{"responde e<br/>cita avaliações<br/>existentes?"}
+    B2 -- não --> X
+    B2 -- sim --> A["Resposta<br/>+ evidências"]
+```
+
+A descrição completa, com o fluxo de construção da base, o papel de cada módulo, a correspondência com as etapas do enunciado e os parâmetros do sistema, está em [docs/arquitetura.md](docs/arquitetura.md).
+
+## Tecnologias e bibliotecas
+
+| Tecnologia | Papel no projeto | Por que esta (detalhes) |
+| --- | --- | --- |
+| Python 3.11 | Linguagem de todo o projeto | — |
+| pandas, PyArrow | Leitura dos CSVs, preparo da base e gravação em Parquet | [Preparo da base](#preparo-da-base-de-documentos) |
+| matplotlib, scikit-learn, Jupyter | Análise exploratória: gráficos, Bag of Words e TF-IDF | [Análise exploratória](#análise-exploratória) |
+| sentence-transformers + PyTorch | Execução local do modelo de embeddings | [Embeddings e índice](#embeddings-e-índice-vetorial) |
+| `intfloat/multilingual-e5-base` | Modelo de embeddings: multilíngue, treinado para busca, sem custo por chamada | [Embeddings e índice](#embeddings-e-índice-vetorial) |
+| ChromaDB | Banco vetorial embutido, com persistência em disco e filtros por metadados | [Embeddings e índice](#embeddings-e-índice-vetorial) |
+| rank-bm25 | Linha de base lexical no experimento E5 × BM25 | [Achado 1](#achado-1-a-busca-acerta-o-assunto-mas-confunde-elogio-com-reclamação) |
+| OpenAI (`gpt-4.1-mini`, Responses API) | Geração da resposta, com saída estruturada | [Resposta com o LLM](#resposta-com-o-llm) |
+| python-dotenv | Leitura da chave da API a partir do `.env` | — |
+| Streamlit | Interface web | [Interface](#interface) |
+| pytest | Testes automatizados | [Testes](#testes) |
+
+**Avaliado e não usado: LangChain.** O fluxo do projeto é curto (busca, contexto, resposta) e precisava de controle fino em pontos que o framework abstrai: os prefixos `passage:` e `query:` do E5, a janela adaptativa de candidatos, a saída estruturada e a conferência das citações. Escrito diretamente, cada passo fica visível no código e na interface, o que também atende à exigência do desafio de demonstrar cada etapa. Para não fechar essa porta, o gerador de embeddings segue a mesma interface das `Embeddings` do LangChain (`embed_documents` e `embed_query`).
+
+## Estrutura do repositório
+
+```
+├── app.py                      # interface em Streamlit
+├── src/
+│   ├── preprocessing.py        # base de documentos: limpeza, normalização e metadados
+│   ├── embeddings.py           # embeddings E5 com os prefixos passage:/query:
+│   ├── vector_store.py         # índice no ChromaDB
+│   ├── retrieval.py            # filtros, busca, repetições e corte de recusa
+│   ├── llm.py                  # cliente da OpenAI com saída estruturada
+│   └── rag_pipeline.py         # prompt, fluxo completo e conferência das citações
+├── scripts/
+│   ├── prepare_data.py         # gera a base de documentos e a amostra
+│   ├── build_index.py          # gera os embeddings e o índice
+│   ├── ask.py                  # perguntas pelo terminal
+│   ├── compare_search.py       # experimento E5 × BM25
+│   ├── calibrate_threshold.py  # calibração do corte de recusa
+│   └── evaluate_rag.py         # avaliação do fluxo completo
+├── tests/                      # testes automatizados (embeddings e LLM falsos)
+├── notebooks/
+│   └── 01_eda_avaliacoes.ipynb # análise exploratória
+├── data/
+│   ├── raw/                    # CSVs da Olist
+│   ├── sample/                 # amostra de 3.000 documentos
+│   └── eval/                   # perguntas de calibração e respostas da avaliação
+├── docs/
+│   ├── arquitetura.md          # arquitetura da solução
+│   ├── processo.md             # processo de construção
+│   └── [IAST] - Tech Challenge - Fase 4.pdf
+├── requirements.txt
+└── .env.example
+```
+
+## Como o projeto foi construído
+
+O projeto foi construído em oito etapas, cada uma numa branch e numa pull request revisada pelo grupo. Toda decisão relevante foi comparada com alternativas e, sempre que possível, medida. Quando uma descoberta exigiu corrigir algo já mesclado, a correção ganhou uma PR própria. O histórico mostra o erro e a correção, em vez de escondê-los.
+
+| Etapa | PR | O que entregou |
+| --- | --- | --- |
+| 0. Organização | #1, #2 | Repositório, dados e enunciado |
+| 1. Análise exploratória | #3, #4 | 14 decisões de preparo, cada uma ligada a um achado |
+| 2. Preparo da base | #5 | 42.370 documentos com metadados |
+| 3. Embeddings e índice | #6, #7 | Índice vetorial e o experimento E5 × BM25 |
+| 4. Busca | #8 | Filtros, agrupamento de repetições e corte calibrado |
+| 5. Resposta com o LLM | #9 | Três barreiras, citações conferidas e escolha do modelo |
+| 6. Interface | #10 | Tela com evidências e etapas do pipeline |
+| 7. Correções | #11 | Recalibração com perguntas genéricas e instrução para perguntas de frequência |
+| 8. Documentação | — | Arquitetura, processo e este README |
+
+Ao longo do caminho, 17 descobertas mudaram o rumo do projeto. Quatro exemplos:
+
+- **O embedding confunde elogio com reclamação** (etapa 3). "Entrega atrasada" trazia "entregue no prazo". O experimento mostrou que o BM25 erra do mesmo jeito, e a correção veio dos metadados: o filtro pela nota do cliente.
+- **O critério de "maior acerto" recusava perguntas legítimas** (etapa 4). Como a recusa na busca é irreversível e o aceite indevido ainda passa pelo LLM, o critério passou a ser não recusar nenhuma pergunta legítima.
+- **Perguntas genéricas eram recusadas** (etapa 8 → 7). Os exemplos reais da documentação mostraram que o conjunto de calibração não tinha perguntas genéricas, justamente o caso de uso principal. O conjunto foi ampliado e o corte, recalibrado.
+- **Um modelo misturava palavras de outros alfabetos** (etapa 7). Com métricas de segurança iguais, a leitura das respostas revelou o defeito no `gpt-5.4-mini` e decidiu a escolha do modelo.
+
+O processo completo, com a linha do tempo, o detalhe de cada etapa, as 17 descobertas e as lições metodológicas, está em [docs/processo.md](docs/processo.md).
+
+## Decisões técnicas por etapa
+
+As seções a seguir detalham cada etapa: o que foi feito, as alternativas avaliadas, as medições e os achados.
 
 ## Dados
 
@@ -24,14 +246,7 @@ O `olist_geolocation_dataset.csv` (61 MB) não foi versionado, porque a soluçã
 
 O notebook [notebooks/01_eda_avaliacoes.ipynb](notebooks/01_eda_avaliacoes.ipynb) analisa as avaliações antes da construção da base de conhecimento: quantas têm texto, tamanho e qualidade dos comentários, vocabulário (*Bag of Words* e TF-IDF), duplicatas, valores ausentes e quais metadados se associam à insatisfação. Cada achado termina numa decisão de preparo da base, e as escolhas com mais de uma alternativa razoável trazem a comparação que levou à decisão. A última seção resume as técnicas de processamento de texto usadas, onde e por quê.
 
-O notebook está salvo com as saídas e pode ser lido direto no GitHub. Para executá-lo localmente (Python 3.11):
-
-```bash
-python -m venv .venv
-# Windows: .venv\Scripts\activate    Linux/macOS: source .venv/bin/activate
-pip install -r requirements.txt
-jupyter notebook notebooks/01_eda_avaliacoes.ipynb
-```
+O notebook está salvo com as saídas e pode ser lido direto no GitHub. Para executá-lo, siga [Como executar](#como-executar) até o passo 3 e rode `jupyter notebook notebooks/01_eda_avaliacoes.ipynb`.
 
 ## Preparo da base de documentos
 
@@ -440,6 +655,29 @@ Ela requer o índice (`python scripts/build_index.py`) e a chave no `.env`. A te
 A busca conta só as cópias exatas que caíram na janela de candidatos, e o número de evidências é uma configuração. Para que nada disso seja lido como frequência, a tela escreve "ao menos N", explica abaixo do título das evidências o que o número significa e repete esse exemplo no aviso das perguntas de frequência. O dado de negócio ("19,6% das reclamações falam de não recebimento") exige contar sobre a base inteira.
 
 **Modelo e índice carregados uma vez.** O modelo de embeddings (1,1 GB) e o índice ficam em cache durante a sessão (`st.cache_resource`). Só a primeira pergunta espera o carregamento. Os metadados para os filtros são lidos do índice em lotes de 5.000, porque pedir as 42 mil avaliações de uma vez estoura o limite de variáveis do SQLite que o Chroma usa internamente.
+
+## Limitações e próximos passos
+
+### Limitações conhecidas
+
+| Limitação | Efeito | Onde está detalhada |
+| --- | --- | --- |
+| A busca semântica não mede frequência | Perguntas como "quais reclamações aparecem com maior frequência?" recebem exemplos, e não uma contagem. A tela avisa, e o LLM é instruído a não ordenar os temas | [Interface](#interface), [Avaliação](#avaliação-e-escolha-do-modelo) |
+| As evidências não são uma amostra representativa | Os comentários mais parecidos com a pergunta não refletem a proporção de clientes satisfeitos e insatisfeitos. O prompt proíbe generalizar, mas a regra reduz o risco sem eliminá-lo | [Avaliação](#avaliação-e-escolha-do-modelo) |
+| O corte de recusa depende da base e das perguntas usadas na calibração | Trocar a base exige recalibrar. As 82 perguntas foram escritas pelo grupo, e um tipo de pergunta ausente pode voltar a ser recusado | [Calibração](#calibração-do-corte-de-recusa) |
+| A recusa de perguntas fora do tema depende sobretudo do LLM | A busca barra 9 de 36. As outras 27 dependem do julgamento do modelo, que acertou todas na avaliação | [Calibração](#calibração-do-corte-de-recusa) |
+| A avaliação confere se as citações existem, não se sustentam a afirmação | A fidelidade de cada citação foi verificada por leitura de uma amostra | [Avaliação](#avaliação-e-escolha-do-modelo) |
+| Temperatura 0 não garante respostas idênticas | Detalhes das respostas variam entre execuções | [Resposta com o LLM](#resposta-com-o-llm) |
+| Os comentários vêm truncados em cerca de 200 caracteres na origem | Parte de relatos longos não está na base | [Análise exploratória](#análise-exploratória) |
+| A instrução sobre os pseudônimos de lojas não foi implementada | Nomes como "lannister" e "stark" são lojas anonimizadas pela Olist, e o prompt ainda não explica isso ao modelo, como previa a decisão 8 da análise exploratória | [docs/processo.md](docs/processo.md), descoberta 17 |
+
+### Próximos passos (fase 2)
+
+1. **Frequência real por tema.** Agrupar as avaliações por tema com os embeddings já calculados (modelagem de tópicos, como no BERTopic), nomear cada grupo com o LLM e contar por tema, nota, categoria e período com DuckDB. Isso responde às perguntas de frequência do enunciado com números, como "não recebimento aparece em 19,6% das avaliações negativas".
+2. **Busca híbrida.** Combinar o E5 com o BM25, que casa termos exatos e raros (nomes de produto, marcas), onde o embedding é mais fraco (Achado 1).
+3. **Avaliação automática da fidelidade.** Um segundo modelo verificando se cada citação sustenta a afirmação (*LLM-as-a-judge*), com um conjunto maior de perguntas, incluindo perguntas de usuários reais.
+4. **Claude como alternativa de LLM**, pela mesma interface `generate`, com a mesma avaliação para comparar.
+5. **Instrução sobre os pseudônimos de lojas** no prompt, seguida de uma nova rodada da avaliação.
 
 ## Testes
 
