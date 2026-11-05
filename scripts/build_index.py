@@ -24,9 +24,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.embeddings import DEFAULT_MODEL, E5Embedder  # noqa: E402
+from src.embeddings import DEFAULT_MODEL, E5Embeddings  # noqa: E402
 from src.preprocessing import load_documents  # noqa: E402
-from src.vector_store import DEFAULT_BATCH_SIZE, DEFAULT_COLLECTION, index_documents, open_collection  # noqa: E402
+from src.vector_store import (  # noqa: E402
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_COLLECTION,
+    count_documents,
+    index_documents,
+    open_vector_store,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,10 +59,10 @@ def main() -> None:
     print(f"Documentos lidos de {args.input.name}: {fmt(len(docs))}")
 
     print(f"Carregando o modelo {args.model}...")
-    embedder = E5Embedder(args.model, device=args.device)
-    print(f"  dimensão {embedder.dimension}, dispositivo {embedder.device}")
+    embeddings = E5Embeddings(args.model, device=args.device)
+    print(f"  dimensão {embeddings.dimension}, dispositivo {embeddings.device}")
 
-    collection = open_collection(args.persist_dir, args.model, args.collection, reset=args.reset)
+    vector_store = open_vector_store(args.persist_dir, embeddings, args.collection, reset=args.reset)
 
     start = time.perf_counter()
 
@@ -64,10 +70,10 @@ def main() -> None:
         elapsed = time.perf_counter() - start
         print(f"\r  indexados {fmt(done)}/{fmt(total)} ({elapsed:.0f} s)", end="", flush=True)
 
-    written = index_documents(collection, docs, embedder, args.batch_size, on_batch=report)
+    written = index_documents(vector_store, docs, args.batch_size, on_batch=report)
     elapsed = time.perf_counter() - start
     print(f"\nGravados {fmt(written)} documentos em {elapsed:.1f} s ({written / elapsed:.0f} por segundo)")
-    print(f"Coleção '{args.collection}' com {fmt(collection.count())} documentos em {args.persist_dir}")
+    print(f"Coleção '{args.collection}' com {fmt(count_documents(vector_store))} documentos em {args.persist_dir}")
 
 
 if __name__ == "__main__":

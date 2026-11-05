@@ -26,9 +26,9 @@ from rank_bm25 import BM25Okapi
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.embeddings import DEFAULT_MODEL, E5Embedder  # noqa: E402
+from src.embeddings import E5Embeddings  # noqa: E402
 from src.preprocessing import load_documents, normalize_for_comparison  # noqa: E402
-from src.vector_store import DEFAULT_COLLECTION, open_collection  # noqa: E402
+from src.vector_store import DEFAULT_COLLECTION, open_vector_store  # noqa: E402
 
 DEFAULT_QUESTION = "entrega atrasada, não chegou no prazo"
 # Comentários que descrevem o problema sem repetir as palavras da pergunta.
@@ -72,13 +72,12 @@ def main() -> None:
         return list(zip(docs["review_score"].iloc[order].tolist(), docs["text"].iloc[order].tolist()))
 
     # ---- E5 -------------------------------------------------------------------------------------
-    embedder = E5Embedder()
-    collection = open_collection(args.persist_dir, DEFAULT_MODEL, DEFAULT_COLLECTION)
-    query_vector = embedder.embed_query(args.question)
+    vector_store = open_vector_store(args.persist_dir, E5Embeddings(), DEFAULT_COLLECTION)
+    query_vector = vector_store.embeddings.embed_query(args.question)
 
     def e5_search(where: dict, n: int) -> list[tuple[int, str]]:
-        result = collection.query(query_embeddings=[query_vector], n_results=n, where=where)
-        return [(meta["review_score"], text) for meta, text in zip(result["metadatas"][0], result["documents"][0])]
+        results = vector_store.similarity_search_by_vector_with_relevance_scores(query_vector, k=n, filter=where)
+        return [(document.metadata["review_score"], document.page_content) for document, _ in results]
 
     no_filter = {"low_information": False}
     with_filter = {"$and": [{"low_information": False}, {"sentiment": "negativo"}]}

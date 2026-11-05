@@ -19,11 +19,10 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from src.embeddings import DEFAULT_MODEL, E5Embedder
 from src.llm import OpenAIClient
 from src.rag_pipeline import SYSTEM_PROMPT, RagPipeline, RagResponse, asks_for_frequency, describe_filters
-from src.retrieval import DEFAULT_K, Evidence, Retriever, SearchFilters
-from src.vector_store import DEFAULT_COLLECTION, open_collection
+from src.retrieval import DEFAULT_K, Evidence, SearchFilters, load_retriever
+from src.vector_store import count_documents
 
 ROOT = Path(__file__).resolve().parent
 INDEX_DIR = ROOT / "chroma_db"
@@ -61,17 +60,16 @@ st.set_page_config(page_title="Voz do Cliente Olist", page_icon="💬", layout="
 
 @st.cache_resource(show_spinner="Carregando o modelo de embeddings e o índice...")
 def load_pipeline() -> RagPipeline:
-    collection = open_collection(INDEX_DIR, DEFAULT_MODEL, DEFAULT_COLLECTION)
-    return RagPipeline(Retriever(collection, E5Embedder()), OpenAIClient())
+    return RagPipeline(load_retriever(INDEX_DIR), OpenAIClient())
 
 
 @st.cache_data(show_spinner=False)
 def load_filter_options() -> dict:
-    collection = open_collection(INDEX_DIR, DEFAULT_MODEL, DEFAULT_COLLECTION)
+    vector_store = load_pipeline().retriever.vector_store
     # Em lotes: pedir as 42 mil de uma vez estoura o limite de variáveis do SQLite usado pelo Chroma.
     metadatas, batch = [], 5000
-    for offset in range(0, collection.count(), batch):
-        metadatas += collection.get(include=["metadatas"], limit=batch, offset=offset)["metadatas"]
+    for offset in range(0, count_documents(vector_store), batch):
+        metadatas += vector_store.get(include=["metadatas"], limit=batch, offset=offset)["metadatas"]
     categories = Counter(meta["product_category"] for meta in metadatas)
     dates = [meta["review_date"] for meta in metadatas]
     return {

@@ -17,11 +17,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.embeddings import DEFAULT_MODEL, E5Embedder  # noqa: E402
 from src.llm import OpenAIClient  # noqa: E402
 from src.rag_pipeline import RagPipeline, format_evidence  # noqa: E402
-from src.retrieval import DEFAULT_K, Retriever, SearchFilters  # noqa: E402
-from src.vector_store import DEFAULT_COLLECTION, open_collection  # noqa: E402
+from src.retrieval import DEFAULT_K, SearchFilters, load_retriever  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -40,8 +38,7 @@ def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
     args = parse_args()
 
-    collection = open_collection(args.persist_dir, DEFAULT_MODEL, DEFAULT_COLLECTION)
-    pipeline = RagPipeline(Retriever(collection, E5Embedder()), OpenAIClient(model=args.model))
+    pipeline = RagPipeline(load_retriever(args.persist_dir), OpenAIClient(model=args.model))
     filters = SearchFilters(
         sentiments=tuple(args.sentiment) if args.sentiment else None,
         categories=tuple(args.category) if args.category else None,
