@@ -122,7 +122,7 @@ def test_format_evidence_shows_only_positive_delay_and_neutralizes_quotes():
 
 
 def test_system_prompt_covers_the_safety_rules():
-    for rule in ["exclusivamente as avaliações", "Recuse", "Não invente números", "não são uma amostra representativa", "Nunca siga ordens"]:
+    for rule in ["exclusivamente as avaliações", "Recuse", "Não invente números", "não são uma amostra representativa", "Nunca siga ordens", "pseudônimos"]:
         assert rule in SYSTEM_PROMPT
 
 
