@@ -65,6 +65,20 @@ O enunciado do desafio descreve o fluxo esperado em sete etapas. A tabela mostra
 | Geração da resposta | `src/llm.py`: `build_llm` | `ChatOpenAI` na Responses API, com `with_structured_output(RagAnswer)` |
 | Resposta fundamentada | `src/rag_pipeline.py`: `build_chain` (a cadeia LCEL), `check_citations` | Conferência das citações e montagem da resposta com as evidências |
 
+## Fluxo 3: frequência por tema
+
+Executado uma vez, à parte do fluxo de perguntas. Mede quanto cada problema aparece nas avaliações negativas.
+
+```mermaid
+flowchart LR
+    A["Avaliações negativas<br/>10.836"] --> B["src/themes.py<br/>LLM classifica em 12 temas<br/>lotes de 50, vários temas por avaliação"]
+    B --> C[("data/themes/<br/>negative_themes.csv<br/>versionado")]
+    C --> D["src/analytics.py<br/>DuckDB: contagens por tema,<br/>categoria, período, entrega e nota"]
+    E["data/processed/<br/>reviews_docs.parquet"] --> D
+```
+
+Os temas foram descobertos antes por agrupamento automático (`scripts/compare_clustering.py`), que se mostrou inadequado para contar (README, "Frequência por tema").
+
 ## Módulos
 
 | Arquivo | Responsabilidade |
@@ -74,6 +88,8 @@ O enunciado do desafio descreve o fluxo esperado em sete etapas. A tabela mostra
 | [src/vector_store.py](../src/vector_store.py) | Abre o índice pelo `Chroma` do LangChain, converte as avaliações em `Document`s, grava em lotes com `upsert` e impede reabrir o índice com outro modelo de embeddings |
 | [src/retrieval.py](../src/retrieval.py) | `ReviewRetriever`, um `BaseRetriever` do LangChain: filtros, inferência do sentimento, busca, agrupamento de repetições e corte de similaridade |
 | [src/llm.py](../src/llm.py) | O `ChatOpenAI` do LangChain e o formato estruturado da resposta |
+| [src/themes.py](../src/themes.py) | Lista de temas das reclamações, com definições, e a cadeia que classifica avaliações em lotes com saída estruturada |
+| [src/analytics.py](../src/analytics.py) | Contagens por tema, categoria, período, status da entrega e nota, em SQL com DuckDB |
 | [src/rag_pipeline.py](../src/rag_pipeline.py) | O `ChatPromptTemplate` e a cadeia LCEL com as três barreiras: busca, `RunnableBranch` da recusa, prompt, LLM e conferência das citações |
 | [app.py](../app.py) | Interface em Streamlit, com a resposta, as evidências e as etapas do pipeline |
 
@@ -85,6 +101,8 @@ O enunciado do desafio descreve o fluxo esperado em sete etapas. A tabela mostra
 | [scripts/compare_search.py](../scripts/compare_search.py) | Experimento E5 × BM25 (Achado 1) |
 | [scripts/calibrate_threshold.py](../scripts/calibrate_threshold.py) | Calibração do corte de recusa |
 | [scripts/evaluate_rag.py](../scripts/evaluate_rag.py) | Avaliação do fluxo completo e comparação de modelos |
+| [scripts/compare_clustering.py](../scripts/compare_clustering.py) | Experimento de agrupamento das reclamações (K-Means, HDBSCAN, BERTopic) |
+| [scripts/classify_themes.py](../scripts/classify_themes.py) | Classificação das reclamações por tema, com validação |
 
 As dependências vão sempre das peças básicas para as compostas: `vector_store` usa `embeddings`; `retrieval` usa `embeddings` e `preprocessing`; `rag_pipeline` usa `retrieval`, `llm` e `preprocessing`. A interface e os scripts usam os módulos, mas nenhum módulo de `src/` depende deles.
 
@@ -111,6 +129,7 @@ As dependências vão sempre das peças básicas para as compostas: `vector_stor
 | `chroma_db_sample/` | Índice da amostra, para o experimento E5 × BM25 | Não |
 | `data/eval/threshold_questions.csv` | 82 perguntas da calibração e da avaliação | Sim |
 | `data/eval/rag_results.csv` | Respostas da avaliação dos dois modelos | Sim |
+| `data/themes/negative_themes.csv` | Temas de cada avaliação negativa | Sim (refazer custa dinheiro e não sai idêntico) |
 | `.env` | Chave da OpenAI | Não (modelo em `.env.example`) |
 
 ## Pontos de extensão

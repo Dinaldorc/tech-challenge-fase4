@@ -10,7 +10,8 @@ Tech Challenge da Fase 4 da Pós Tech FIAP. O enunciado está em [docs/](docs/).
 
 - 42.370 avaliações com texto, do [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce), indexadas por significado com o modelo `multilingual-e5-base`;
 - três barreiras contra respostas sem base: o corte de similaridade da busca, o julgamento do LLM e a conferência das citações;
-- na avaliação com 87 perguntas: 50 das 51 perguntas legítimas respondidas, 36 das 36 perguntas fora do tema recusadas, nenhuma citação inexistente e nenhuma obediência a uma instrução maliciosa escondida num comentário.
+- na avaliação com 87 perguntas: 50 das 51 perguntas legítimas respondidas, 36 das 36 perguntas fora do tema recusadas, nenhuma citação inexistente e nenhuma obediência a uma instrução maliciosa escondida num comentário;
+- frequência medida nas 10.836 avaliações negativas: o problema mais comum é o não recebimento (32,1%), seguido de atendimento sem resposta (21,0%) e entrega parcial (16,4%).
 
 ## Sumário
 
@@ -20,7 +21,7 @@ Tech Challenge da Fase 4 da Pós Tech FIAP. O enunciado está em [docs/](docs/).
 - [Tecnologias e bibliotecas](#tecnologias-e-bibliotecas) · [Sem × com LangChain](#sem--com-langchain-a-comparação-das-duas-vias)
 - [Estrutura do repositório](#estrutura-do-repositório)
 - [Como o projeto foi construído](#como-o-projeto-foi-construído)
-- Decisões técnicas por etapa: [Dados](#dados) · [Análise exploratória](#análise-exploratória) · [Preparo da base](#preparo-da-base-de-documentos) · [Embeddings e índice](#embeddings-e-índice-vetorial) · [Busca](#busca-das-evidências) · [Resposta com o LLM](#resposta-com-o-llm) · [Interface](#interface)
+- Decisões técnicas por etapa: [Dados](#dados) · [Análise exploratória](#análise-exploratória) · [Preparo da base](#preparo-da-base-de-documentos) · [Embeddings e índice](#embeddings-e-índice-vetorial) · [Busca](#busca-das-evidências) · [Resposta com o LLM](#resposta-com-o-llm) · [Frequência por tema](#frequência-por-tema) · [Interface](#interface)
 - [Limitações e próximos passos](#limitações-e-próximos-passos)
 - [Testes](#testes)
 
@@ -68,6 +69,8 @@ python scripts/ask.py "quais as principais reclamações?" --category moveis_dec
 | Testes automatizados | `pytest` | Segundos, sem modelo e sem API |
 | E5 × BM25 (Achado 1) | `python scripts/build_index.py --input data/sample/reviews_sample.csv --persist-dir chroma_db_sample` e depois `python scripts/compare_search.py` | Usa o índice da amostra, em menos de 1 min |
 | Calibração do corte de recusa | `python scripts/calibrate_threshold.py` | Sem custo de API |
+| Agrupamento das reclamações (primeira tentativa de medir frequência) | `python scripts/compare_clustering.py` | Sem custo de API. O BERTopic é opcional (`pip install bertopic`) |
+| Classificação das reclamações por tema | `python scripts/classify_themes.py` | Chama a OpenAI: cerca de US$ 0,43 para a base inteira. O resultado já está em [data/themes/negative_themes.csv](data/themes/negative_themes.csv) |
 | Avaliação do fluxo completo | `python scripts/evaluate_rag.py` | Chama a OpenAI: cerca de 160 chamadas, poucos centavos de dólar. As respostas já estão em [data/eval/rag_results.csv](data/eval/rag_results.csv) |
 | Análise exploratória | `jupyter notebook notebooks/01_eda_avaliacoes.ipynb` | O notebook está salvo com as saídas e pode ser lido direto no GitHub |
 
@@ -151,10 +154,11 @@ A descrição completa, com o fluxo de construção da base, o papel de cada mó
 | --- | --- | --- |
 | Python 3.11 | Linguagem de todo o projeto | — |
 | pandas, PyArrow | Leitura dos CSVs, preparo da base e gravação em Parquet | [Preparo da base](#preparo-da-base-de-documentos) |
-| matplotlib, scikit-learn, Jupyter | Análise exploratória: gráficos, Bag of Words e TF-IDF | [Análise exploratória](#análise-exploratória) |
+| matplotlib, scikit-learn, Jupyter | Análise exploratória (gráficos, Bag of Words e TF-IDF) e o experimento de agrupamento (K-Means, HDBSCAN) | [Análise exploratória](#análise-exploratória), [Frequência por tema](#frequência-por-tema) |
 | sentence-transformers + PyTorch | Execução local do modelo de embeddings | [Embeddings e índice](#embeddings-e-índice-vetorial) |
 | `intfloat/multilingual-e5-base` | Modelo de embeddings: multilíngue, treinado para busca, sem custo por chamada | [Embeddings e índice](#embeddings-e-índice-vetorial) |
 | LangChain (`langchain-core`, `langchain-chroma`, `langchain-openai`) | Estrutura do pipeline inteiro: `Embeddings`, `Chroma`, `BaseRetriever`, `ChatPromptTemplate`, `ChatOpenAI` com saída estruturada e a cadeia LCEL | [Sem × com LangChain](#sem--com-langchain-a-comparação-das-duas-vias) |
+| DuckDB | Contagens de temas por categoria, período, status da entrega e nota, em SQL, sem servidor | [Frequência por tema](#frequência-por-tema) |
 | ChromaDB | Banco vetorial embutido, com persistência em disco e filtros por metadados | [Embeddings e índice](#embeddings-e-índice-vetorial) |
 | rank-bm25 | Linha de base lexical no experimento E5 × BM25 | [Achado 1](#achado-1-a-busca-acerta-o-assunto-mas-confunde-elogio-com-reclamação) |
 | OpenAI (`gpt-4.1-mini`, pelo `ChatOpenAI`, na Responses API) | Geração da resposta, com saída estruturada | [Resposta com o LLM](#resposta-com-o-llm) |
@@ -209,21 +213,26 @@ A revisão deu ao projeto algo pouco comum: **duas implementações do mesmo sis
 │   ├── vector_store.py         # índice no ChromaDB
 │   ├── retrieval.py            # filtros, busca, repetições e corte de recusa
 │   ├── llm.py                  # cliente da OpenAI com saída estruturada
-│   └── rag_pipeline.py         # prompt, fluxo completo e conferência das citações
+│   ├── rag_pipeline.py         # prompt, fluxo completo e conferência das citações
+│   ├── themes.py               # temas das reclamações e classificação pelo LLM
+│   └── analytics.py            # contagens por tema com DuckDB
 ├── scripts/
 │   ├── prepare_data.py         # gera a base de documentos e a amostra
 │   ├── build_index.py          # gera os embeddings e o índice
 │   ├── ask.py                  # perguntas pelo terminal
 │   ├── compare_search.py       # experimento E5 × BM25
 │   ├── calibrate_threshold.py  # calibração do corte de recusa
-│   └── evaluate_rag.py         # avaliação do fluxo completo
+│   ├── evaluate_rag.py         # avaliação do fluxo completo
+│   ├── compare_clustering.py   # experimento de agrupamento das reclamações
+│   └── classify_themes.py      # classificação das reclamações por tema
 ├── tests/                      # testes automatizados (embeddings e LLM falsos)
 ├── notebooks/
 │   └── 01_eda_avaliacoes.ipynb # análise exploratória
 ├── data/
 │   ├── raw/                    # CSVs da Olist
 │   ├── sample/                 # amostra de 3.000 documentos
-│   └── eval/                   # perguntas de calibração e respostas da avaliação
+│   ├── eval/                   # perguntas de calibração e respostas da avaliação
+│   └── themes/                 # tema de cada avaliação negativa (resultado da classificação)
 ├── docs/
 │   ├── arquitetura.md          # arquitetura da solução
 │   ├── processo.md             # processo de construção
@@ -234,7 +243,7 @@ A revisão deu ao projeto algo pouco comum: **duas implementações do mesmo sis
 
 ## Como o projeto foi construído
 
-O projeto foi construído em dez etapas, da organização do repositório à adoção do LangChain, cada uma numa branch e numa pull request revisada pelo grupo. Toda decisão relevante foi comparada com alternativas e, sempre que possível, medida. Quando uma descoberta exigiu corrigir algo já mesclado, a correção ganhou uma PR própria. O histórico mostra o erro e a correção, em vez de escondê-los.
+O projeto foi construído em onze etapas, da organização do repositório à medição da frequência por tema, cada uma numa branch e numa pull request revisada pelo grupo. Toda decisão relevante foi comparada com alternativas e, sempre que possível, medida. Quando uma descoberta exigiu corrigir algo já mesclado, a correção ganhou uma PR própria. O histórico mostra o erro e a correção, em vez de escondê-los.
 
 | Etapa | PR | O que entregou |
 | --- | --- | --- |
@@ -249,15 +258,17 @@ O projeto foi construído em dez etapas, da organização do repositório à ado
 | 8. Documentação | #12 | Arquitetura, processo e este README |
 | Correção | #13 | Instrução sobre os pseudônimos de lojas, decisão da análise exploratória que não tinha chegado ao código |
 | 9. Adoção do LangChain | #14, #15 | Pipeline inteiro reescrito com os componentes do LangChain, com os mesmos resultados comprovados, e a comparação medida das duas vias |
+| 10. Frequência por tema | #16 | Temas das reclamações medidos: agrupamento testado e descartado para contar, classificação pelo LLM validada de duas formas |
 
-Ao longo do caminho, 19 descobertas mudaram o rumo do projeto. Quatro exemplos:
+Ao longo do caminho, 23 descobertas mudaram o rumo do projeto. Cinco exemplos:
 
 - **O embedding confunde elogio com reclamação** (etapa 3). "Entrega atrasada" trazia "entregue no prazo". O experimento mostrou que o BM25 erra do mesmo jeito, e a correção veio dos metadados: o filtro pela nota do cliente.
 - **O critério de "maior acerto" recusava perguntas legítimas** (etapa 4). Como a recusa na busca é irreversível e o aceite indevido ainda passa pelo LLM, o critério passou a ser não recusar nenhuma pergunta legítima.
 - **Perguntas genéricas eram recusadas** (etapa 8 → 7). Os exemplos reais da documentação mostraram que o conjunto de calibração não tinha perguntas genéricas, justamente o caso de uso principal. O conjunto foi ampliado e o corte, recalibrado.
+- **O agrupamento automático não serve para contar temas** (etapa 10). As reclamações formam um contínuo e misturam vários temas na mesma avaliação. O agrupamento passou a servir só para descobrir os temas, e a contagem foi feita por classificação, validada contra uma referência independente e contra os dados do pedido.
 - **Um modelo misturava palavras de outros alfabetos** (etapa 7). Com métricas de segurança iguais, a leitura das respostas revelou o defeito no `gpt-5.4-mini` e decidiu a escolha do modelo.
 
-O processo completo, com a linha do tempo, o detalhe de cada etapa, as 19 descobertas e as lições metodológicas, está em [docs/processo.md](docs/processo.md).
+O processo completo, com a linha do tempo, o detalhe de cada etapa, as 23 descobertas e as lições metodológicas, está em [docs/processo.md](docs/processo.md).
 
 ## Decisões técnicas por etapa
 
@@ -658,6 +669,114 @@ A única pergunta legítima recusada pelos dois ("o pessoal ficou satisfeito com
 
 **Limitações.** A avaliação confere se as citações **existem**, não se cada uma **sustenta** a afirmação a que está ligada. Essa verificação foi feita lendo uma amostra das respostas. Automatizá-la, com um segundo modelo atuando como avaliador (*LLM-as-a-judge*) e métricas de fidelidade às evidências, fica para a fase 2, junto com um conjunto maior de perguntas.
 
+## Frequência por tema
+
+A busca semântica responde **o que** os clientes dizem, mas não **quanto**: ela traz os comentários mais parecidos com a pergunta, e não uma amostra representativa. Duas perguntas do próprio enunciado pedem frequência ("quais reclamações aparecem com **maior frequência**?"). Esta etapa mede a frequência de cada tema nas 10.836 avaliações negativas com texto.
+
+- [src/themes.py](src/themes.py): lista de temas e classificação das avaliações pelo LLM.
+- [src/analytics.py](src/analytics.py): contagens por tema, categoria, período, status da entrega e nota, com DuckDB.
+- [scripts/compare_clustering.py](scripts/compare_clustering.py): experimento de agrupamento automático (a primeira tentativa).
+- [scripts/classify_themes.py](scripts/classify_themes.py): classificação e validação. O resultado está versionado em [data/themes/negative_themes.csv](data/themes/negative_themes.csv), porque refazê-lo custa dinheiro e não sai idêntico.
+
+### Resultado
+
+| Tema | Avaliações | % das negativas |
+| --- | --- | --- |
+| Não recebimento | 3.476 | 32,1% |
+| Atendimento sem resposta | 2.273 | 21,0% |
+| Entrega parcial (faltaram itens) | 1.773 | 16,4% |
+| Produto errado ou diferente do anunciado | 1.760 | 16,2% |
+| Defeito ou baixa qualidade | 1.698 | 15,7% |
+| Atraso na entrega | 1.696 | 15,7% |
+| Troca, devolução ou reembolso | 1.491 | 13,8% |
+| Outro motivo | 910 | 8,4% |
+| Logística e frete | 617 | 5,7% |
+| Nota fiscal e cobrança | 371 | 3,4% |
+| Embalagem | 267 | 2,5% |
+| Sem reclamação no texto (elogio com nota baixa) | 246 | 2,3% |
+
+Uma avaliação pode ter mais de um tema (1,53 em média), então as porcentagens somam mais de 100%. Por categoria, os padrões mudam: em esporte e lazer, o não recebimento chega a 40%; em móveis e decoração, a entrega parcial sobe para 28% (móveis costumam ser enviados em vários volumes); em informática, produto errado (23%) e defeito (20%) vêm logo depois do não recebimento.
+
+### Primeira tentativa: agrupamento automático
+
+O plano inicial era agrupar as avaliações pelos embeddings já calculados e contar o tamanho de cada grupo. Testamos três algoritmos e validamos contra uma **referência independente**: uma expressão regular de não recebimento ("não recebi", "não chegou", "ainda não", "cadê"), que marca 3.175 avaliações (29,3%). O grupo que representa o não recebimento deveria reunir a maior parte delas.
+
+| Algoritmo | Resultado | Não recebimento: melhor grupo contra a referência (F1) |
+| --- | --- | --- |
+| K-Means (k de 5 a 30) | Silhueta de 0,07 a 0,006: os grupos quase não se separam | 0,38 |
+| HDBSCAN (sobre PCA com 50 dimensões) | 48% a 94% das avaliações sem grupo | — |
+| BERTopic (UMAP + HDBSCAN + c-TF-IDF) | 20 temas, mas 23% das avaliações sem tema, e o não recebimento dividido em 6 temas pela forma de escrever | 0,29 |
+
+**Por que o agrupamento não serve para contar:**
+- **A mesma avaliação fala de vários temas** ("comprei dois, recebi um e ainda atrasou"), e o agrupamento põe cada uma num grupo só.
+- **As reclamações não formam grupos separados.** A silhueta perto de zero mostra um contínuo, em que os algoritmos acabam separando pela forma de escrever, e não pelo assunto.
+- **Avaliações sem grupo não podem ser contadas**, e no BERTopic elas são quase uma em cada quatro.
+
+**O que o agrupamento entregou: a descoberta dos temas.** Os termos de cada grupo (pelo c-TF-IDF) e os temas do BERTopic apontaram os mesmos assuntos da análise exploratória: não recebimento, demora, entrega parcial ("comprei dois, recebi um"), defeito, produto diferente, frete e Correios, falta de resposta. Daí a separação: **o agrupamento descobre os temas, e a classificação os mede.**
+
+### Classificação com o LLM como anotador
+
+Cada avaliação negativa é classificada pelo `gpt-4.1-mini` numa lista fechada de 12 temas, cada um com uma definição (em [src/themes.py](src/themes.py)). Uma avaliação pode receber vários temas. As avaliações vão em lotes de 50, numeradas, e o modelo devolve uma saída estruturada com os temas de cada número. Temas fora da lista são rejeitados pelo próprio formato, e o código confere se todos os números voltaram.
+
+**Piloto com 300 avaliações, antes da base inteira:**
+- **Custo medido:** 40 tokens de entrada e 15 de saída por avaliação.
+- **2 avaliações ficaram sem resposta:** "Gostei da saia de cama box... recomendado" e "bom", elogios dados com nota baixa. Nenhum tema se aplicava, e o modelo as pulou. Foi criado o tema "sem reclamação", e na segunda rodada nenhuma ficou sem resposta.
+- **Estabilidade:** rodando duas vezes sobre as mesmas avaliações, 89% receberam exatamente os mesmos temas. Nos temas principais, a concordância entre as rodadas ficou entre 89% e 100%. "Outro" (59%) e "nota fiscal e cobrança" (75%, com poucos casos) oscilam mais.
+
+**Base inteira:** 10.836 avaliações em 217 chamadas e 6 minutos, com 444 mil tokens de entrada e 160 mil de saída (cerca de US$ 0,43 pelos preços de tabela do modelo). Nenhuma avaliação ficou sem resposta.
+
+### Validação
+
+**1. Contra a referência independente.** No não recebimento, a classificação concorda com a expressão regular em 80% e 73% dos casos, nos dois sentidos (F1 de 0,76, contra 0,38 do melhor agrupamento). Para saber quem erra nas divergências, lemos as 40 do piloto:
+- **das 21 que só o LLM marcou, todas são de fato não recebimento.** A expressão regular perdeu por erros de digitação ("AIND ANÃO RECEBI", "Nao recebino produto") ou por outras formas de dizer ("ainda estou esperando meu pedido", "até agora nada");
+- **das 19 que só a expressão regular marcou, o LLM acertou em 16 ou 17.** Eram entregas parciais ("Recebi só a fruteira e nao recebi o cesto"), retirada nos Correios ("Paguei o frete mas não recebi em casa tive que busca nos correios") ou falta de resposta a um pedido de troca ("Solicitei a troca e ainda não fui atendida"). Restaram 2 ou 3 casos discutíveis, como "não foi entregue no prazo (40 dias após a compra) e cancelaram meu pedido".
+
+A referência erra mais do que a classificação: ela é útil para detectar problemas grosseiros, mas não é um gabarito.
+
+**2. Contra os dados do pedido.** O status da entrega vem do sistema da Olist, e não do texto. Mesmo assim, os dois concordam:
+
+| Status da entrega no pedido | Avaliações | Com o tema "não recebimento" | Com defeito, entrega parcial ou produto errado |
+| --- | --- | --- | --- |
+| Enviado e não recebido | 498 | 67% | 1% |
+| Atrasado | 2.764 | 64% | 2% a 3% |
+| Não enviado | 392 | 63% | 1% |
+| Cancelado ou indisponível | 703 | 53% | 1% a 5% |
+| Entregue no prazo | 6.478 | 12% | 25% a 26% cada |
+
+Quando o produto não chega, as reclamações são de logística; quando chega, passam a ser sobre o produto. É o padrão esperado, e ele aparece sem que o LLM tenha visto o status do pedido.
+
+### Um achado de negócio: entregas registradas que o cliente diz não ter recebido
+
+Os 12% de não recebimento em pedidos **entregues no prazo** são 766 avaliações. A primeira hipótese, a de avaliações escritas antes da entrega, foi descartada: só 1% delas é anterior à data de entrega registrada. Outros 14% também são entregas parciais. **Os 656 casos restantes são clientes dizendo que não receberam pedidos que o sistema registra como entregues**, muitas vezes de forma explícita: "Consta no site que o produto foi entregue, mas não recebi". Há também casos de retirada na agência dos Correios. Para a operação, isso significa que o status "entregue" não é totalmente confiável, e que essas reclamações são um ponto de partida para auditar a última etapa da entrega. É o tipo de informação que só o texto das avaliações revela.
+
+### Decisões e alternativas avaliadas
+
+| Decisão | Alternativa | Por que a alternativa ficou de fora |
+| --- | --- | --- |
+| Classificação pelo LLM | Agrupamento (K-Means, BERTopic) | Medido acima: não reúne os temas e deixa avaliações sem grupo |
+| Classificação pelo LLM | Palavras-chave | Perde as outras formas de dizer; a expressão regular de não recebimento acerta menos que o LLM nas divergências |
+| Classificação pelo LLM | Similaridade do embedding com a descrição de cada tema | As similaridades do E5 ficam numa faixa estreita (Achado 2) e o embedding confunde polaridade (Achado 1) |
+| Lista fechada de temas | Temas livres criados pelo LLM | Temas livres variam entre chamadas e não podem ser contados |
+| Contagem com DuckDB | `groupby` do pandas | O SQL expressa os cruzamentos diretamente, e o DuckDB desdobra a lista de temas (`unnest`) e lê CSV e Parquet sem servidor |
+| Resultado versionado | Classificar a cada execução | Custaria dinheiro a cada vez e não sairia idêntico |
+
+O BERTopic não está no `requirements.txt`: ele traria 7 pacotes (inclusive o `numba`) e não foi escolhido. Para reproduzir essa parte do experimento, instale-o à parte (`pip install bertopic`).
+
+### Como reproduzir
+
+```bash
+python scripts/compare_clustering.py                                   # agrupamento (sem custo de API)
+python scripts/classify_themes.py --sample 300 --output piloto.csv    # piloto (centavos)
+python scripts/classify_themes.py                                      # base inteira (cerca de US$ 0,43)
+```
+
+### Limitações
+
+- **Só as avaliações negativas** foram classificadas. Os elogios ficam para uma próxima rodada, com uma lista de temas própria.
+- **Um único modelo anota.** A estabilidade entre rodadas (89%) e as duas validações dão confiança, mas não substituem um gabarito revisado por pessoas. As divergências do piloto foram lidas por um único revisor.
+- **Os comentários vêm truncados em cerca de 200 caracteres** na origem, então temas citados no fim de relatos longos podem ter se perdido.
+- **As contagens ainda não chegam à interface nem às respostas do RAG.** Esse é o passo seguinte.
+
 ## Interface
 
 A interface em Streamlit ([app.py](app.py)) é o ponto de entrada para gestores e analistas:
@@ -705,7 +824,7 @@ A busca conta só as cópias exatas que caíram na janela de candidatos, e o nú
 
 | Limitação | Efeito | Onde está detalhada |
 | --- | --- | --- |
-| A busca semântica não mede frequência | Perguntas como "quais reclamações aparecem com maior frequência?" recebem exemplos, e não uma contagem. A tela avisa, e o LLM é instruído a não ordenar os temas | [Interface](#interface), [Avaliação](#avaliação-e-escolha-do-modelo) |
+| A frequência por tema ainda não chega às respostas | A frequência foi medida à parte (32,1% de não recebimento, por exemplo), mas perguntas como "quais reclamações aparecem com maior frequência?" ainda recebem exemplos da busca, com um aviso na tela e a instrução ao LLM de não ordenar os temas | [Frequência por tema](#frequência-por-tema), [Avaliação](#avaliação-e-escolha-do-modelo) |
 | As evidências não são uma amostra representativa | Os comentários mais parecidos com a pergunta não refletem a proporção de clientes satisfeitos e insatisfeitos. O prompt proíbe generalizar, mas a regra reduz o risco sem eliminá-lo | [Avaliação](#avaliação-e-escolha-do-modelo) |
 | O corte de recusa depende da base e das perguntas usadas na calibração | Trocar a base exige recalibrar. As 82 perguntas foram escritas pelo grupo, e um tipo de pergunta ausente pode voltar a ser recusado | [Calibração](#calibração-do-corte-de-recusa) |
 | A recusa de perguntas fora do tema depende sobretudo do LLM | A busca barra 9 de 36. As outras 27 dependem do julgamento do modelo, que acertou todas na avaliação | [Calibração](#calibração-do-corte-de-recusa) |
@@ -726,7 +845,7 @@ Com 42 mil avaliações e poucas pessoas usando ao mesmo tempo, o desempenho atu
 
 ### Próximos passos (fase 2)
 
-1. **Frequência real por tema.** Agrupar as avaliações por tema com os embeddings já calculados (modelagem de tópicos, como no BERTopic), nomear cada grupo com o LLM e contar por tema, nota, categoria e período com DuckDB. Isso responde às perguntas de frequência do enunciado com números, como "não recebimento aparece em 19,6% das avaliações negativas".
+1. **Levar a frequência por tema à interface e às respostas.** Uma aba com o ranking de temas e filtros, e as contagens reais no contexto enviado ao LLM quando a pergunta pede frequência. Depois, classificar também os elogios, com uma lista de temas própria.
 2. **Busca híbrida.** Combinar o E5 com o BM25, que casa termos exatos e raros (nomes de produto, marcas), onde o embedding é mais fraco (Achado 1).
 3. **Avaliação automática da fidelidade.** Um segundo modelo verificando se cada citação sustenta a afirmação (*LLM-as-a-judge*), com um conjunto maior de perguntas, incluindo perguntas de usuários reais.
 4. **Claude como alternativa de LLM**, trocando o `ChatOpenAI` pelo `ChatAnthropic`, com a mesma avaliação para comparar.
