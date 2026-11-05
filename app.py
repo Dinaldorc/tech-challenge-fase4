@@ -19,7 +19,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from src.llm import OpenAIClient
+from src.llm import build_llm
 from src.rag_pipeline import SYSTEM_PROMPT, RagPipeline, RagResponse, asks_for_frequency, describe_filters
 from src.retrieval import DEFAULT_K, Evidence, SearchFilters, load_retriever
 from src.vector_store import count_documents
@@ -60,7 +60,7 @@ st.set_page_config(page_title="Voz do Cliente Olist", page_icon="💬", layout="
 
 @st.cache_resource(show_spinner="Carregando o modelo de embeddings e o índice...")
 def load_pipeline() -> RagPipeline:
-    return RagPipeline(load_retriever(INDEX_DIR), OpenAIClient())
+    return RagPipeline(load_retriever(INDEX_DIR), build_llm())
 
 
 @st.cache_data(show_spinner=False)

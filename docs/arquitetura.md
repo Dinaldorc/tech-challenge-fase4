@@ -44,8 +44,8 @@ flowchart TD
     R --> S["Seleção<br/>agrupa textos repetidos<br/>janela adaptativa de candidatos"]
     S --> B1{"Barreira 1<br/>alguma evidência com<br/>similaridade ≥ 0,82?"}
     B1 -- não --> X1["Recusa sem chamar o LLM"]
-    B1 -- sim --> C["Construção do contexto<br/>até 8 avaliações numeradas, com metadados<br/>+ instrução extra se a pergunta pede frequência"]
-    C --> L["Geração com o LLM<br/>gpt-4.1-mini, temperatura 0<br/>saída estruturada"]
+    B1 -- sim --> C["Construção do contexto: ChatPromptTemplate<br/>até 8 avaliações numeradas, com metadados<br/>+ instrução extra se a pergunta pede frequência"]
+    C --> L["Geração com o LLM: ChatOpenAI<br/>gpt-4.1-mini, temperatura 0<br/>with_structured_output"]
     L --> B2{"Barreira 2<br/>o LLM considera que as<br/>avaliações respondem?"}
     B2 -- não --> X2["Recusa com a justificativa do modelo"]
     B2 -- sim --> B3{"Barreira 3<br/>a resposta cita alguma<br/>avaliação existente?"}
@@ -61,9 +61,9 @@ O enunciado do desafio descreve o fluxo esperado em sete etapas. A tabela mostra
 | Processamento da pergunta | `src/retrieval.py`: `infer_sentiment`, `build_where` | Inferência do sentimento e conversão dos filtros para a consulta do Chroma |
 | Representação vetorial | `src/embeddings.py`: `E5Embeddings.embed_query` (componente `Embeddings` do LangChain) | Embedding da pergunta com o prefixo `query:` |
 | Recuperação das avaliações | `src/retrieval.py`: `ReviewRetriever.search` (um `BaseRetriever` do LangChain sobre o `Chroma`) | Busca por similaridade de cosseno dentro dos filtros |
-| Construção do contexto | `src/rag_pipeline.py`: `build_user_prompt`, `format_evidence` | Avaliações numeradas, com metadados, e instruções do sistema |
-| Geração da resposta | `src/llm.py`: `OpenAIClient.generate` | Responses API com saída estruturada (`RagAnswer`) |
-| Resposta fundamentada | `src/rag_pipeline.py`: `RagPipeline.ask`, `check_citations` | Conferência das citações e montagem da resposta com as evidências |
+| Construção do contexto | `src/rag_pipeline.py`: `PROMPT` (um `ChatPromptTemplate`), `prompt_inputs`, `format_evidence` | Avaliações numeradas, com metadados, e instruções do sistema |
+| Geração da resposta | `src/llm.py`: `build_llm` | `ChatOpenAI` na Responses API, com `with_structured_output(RagAnswer)` |
+| Resposta fundamentada | `src/rag_pipeline.py`: `build_chain` (a cadeia LCEL), `check_citations` | Conferência das citações e montagem da resposta com as evidências |
 
 ## Módulos
 
@@ -73,8 +73,8 @@ O enunciado do desafio descreve o fluxo esperado em sete etapas. A tabela mostra
 | [src/embeddings.py](../src/embeddings.py) | Componente `Embeddings` do LangChain: gera os embeddings E5, com os prefixos `passage:` e `query:` e vetores normalizados |
 | [src/vector_store.py](../src/vector_store.py) | Abre o índice pelo `Chroma` do LangChain, converte as avaliações em `Document`s, grava em lotes com `upsert` e impede reabrir o índice com outro modelo de embeddings |
 | [src/retrieval.py](../src/retrieval.py) | `ReviewRetriever`, um `BaseRetriever` do LangChain: filtros, inferência do sentimento, busca, agrupamento de repetições e corte de similaridade |
-| [src/llm.py](../src/llm.py) | Cliente da OpenAI e o formato estruturado da resposta |
-| [src/rag_pipeline.py](../src/rag_pipeline.py) | Prompt, fluxo completo com as três barreiras e conferência das citações |
+| [src/llm.py](../src/llm.py) | O `ChatOpenAI` do LangChain e o formato estruturado da resposta |
+| [src/rag_pipeline.py](../src/rag_pipeline.py) | O `ChatPromptTemplate` e a cadeia LCEL com as três barreiras: busca, `RunnableBranch` da recusa, prompt, LLM e conferência das citações |
 | [app.py](../app.py) | Interface em Streamlit, com a resposta, as evidências e as etapas do pipeline |
 
 | Script | Uso |
@@ -117,7 +117,7 @@ As dependências vão sempre das peças básicas para as compostas: `vector_stor
 
 A organização em módulos com interfaces pequenas permite evoluir partes isoladas:
 
-- **Outro provedor de LLM** (Claude, por exemplo): basta uma classe com o método `generate`, sem mudar o pipeline.
+- **Outro provedor de LLM** (Claude, por exemplo): basta trocar o `ChatOpenAI` por outro modelo de chat do LangChain, como o `ChatAnthropic`, em `src/llm.py`, sem mudar a cadeia.
 - **Outro banco vetorial** (Qdrant, pgvector): basta outra implementação de `VectorStore` do LangChain, com a troca restrita a `src/vector_store.py` e à consulta em `src/retrieval.py`.
 - **Busca híbrida** (E5 + BM25): um segundo recuperador combinado em `src/retrieval.py`.
 - **Análises quantitativas** (frequência por tema): um módulo novo que lê a base de documentos e os embeddings, sem passar pelo fluxo de resposta.

@@ -35,7 +35,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.llm import OpenAIClient  # noqa: E402
+from src.llm import build_llm  # noqa: E402
 from src.rag_pipeline import RagPipeline  # noqa: E402
 from src.rag_pipeline import asks_for_frequency  # noqa: E402
 from src.retrieval import Evidence, RetrievalResult, ReviewRetriever, load_retriever, parse_filters  # noqa: E402
@@ -125,7 +125,7 @@ def main() -> None:
 
     rows = []
     for model in args.models:
-        pipeline = RagPipeline(retriever, OpenAIClient(model=model))
+        pipeline = RagPipeline(retriever, build_llm(model=model))
         for question in questions.itertuples():
             start = time.perf_counter()
             response = pipeline.ask(question.question, filters=parse_filters(question.filters))
@@ -141,7 +141,7 @@ def main() -> None:
             print(f"  {model:<14} {'RESP' if response.answered else 'RECUSA ' + (response.refused_at or ''):<14}"
                   f" {question.question[:60]}")
 
-        attack = RagPipeline(FixedRetriever(injection), OpenAIClient(model=model)).ask(INJECTION_QUESTION)
+        attack = RagPipeline(FixedRetriever(injection), build_llm(model=model)).ask(INJECTION_QUESTION)
         followed = any(marker in attack.answer.lower() for marker in INJECTION_MARKERS)
         cited_fake = any(e.review_id == "injecao" for e in attack.citations)
         rows.append({"model": model, "question": "[injeção] " + INJECTION_QUESTION, "kind": "injecao",
