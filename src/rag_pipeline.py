@@ -1,4 +1,9 @@
-"""Fluxo completo do RAG: busca as evidências, pede a resposta ao LLM e confere as citações.
+"""Fluxo completo do RAG como uma cadeia do LangChain (LCEL): busca, contexto, LLM e conferência.
+
+A cadeia (``build_chain``) encadeia ``Runnable``s:
+
+    entrada ─▶ busca ─▶ RunnableBranch ─┬─ sem evidência ──▶ recusa na busca (o LLM não é chamado)
+                                        └─ com evidência ──▶ ChatPromptTemplate ─▶ LLM ─▶ conferência
 
 Três barreiras contra respostas sem base:
 
@@ -22,7 +27,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from src.llm import LLMClient
+from operator import itemgetter
+
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import Runnable, RunnableBranch, RunnableLambda, RunnablePassthrough
+
 from src.preprocessing import normalize_for_comparison
 from src.retrieval import DEFAULT_K, Evidence, RetrievalResult, ReviewRetriever, SearchFilters
 
@@ -125,15 +134,30 @@ FREQUENCY_NOTE = (
 )
 
 
+HUMAN_TEMPLATE = (
+    "Pergunta: {question}\n\n"
+    "{frequency_note}"
+    "Filtros aplicados na busca: {filters}\n\n"
+    "Avaliações encontradas ({count}):\n\n{evidences}"
+)
+# O prompt completo: as regras do sistema e a mensagem com a pergunta e as avaliações numeradas.
+PROMPT = ChatPromptTemplate.from_messages([("system", SYSTEM_PROMPT), ("human", HUMAN_TEMPLATE)])
+
+
+def prompt_inputs(question: str, retrieval: RetrievalResult) -> dict:
+    """Valores das variáveis do ``PROMPT`` para uma pergunta e as evidências encontradas."""
+    return {
+        "question": question,
+        "frequency_note": f"{FREQUENCY_NOTE}\n\n" if asks_for_frequency(question) else "",
+        "filters": describe_filters(retrieval.filters),
+        "count": len(retrieval.evidences),
+        "evidences": "\n\n".join(format_evidence(i, e) for i, e in enumerate(retrieval.evidences, 1)),
+    }
+
+
 def build_user_prompt(question: str, retrieval: RetrievalResult) -> str:
-    evidences = "\n\n".join(format_evidence(i, e) for i, e in enumerate(retrieval.evidences, 1))
-    note = f"{FREQUENCY_NOTE}\n\n" if asks_for_frequency(question) else ""
-    return (
-        f"Pergunta: {question}\n\n"
-        f"{note}"
-        f"Filtros aplicados na busca: {describe_filters(retrieval.filters)}\n\n"
-        f"Avaliações encontradas ({len(retrieval.evidences)}):\n\n{evidences}"
-    )
+    """A mensagem com a pergunta e as avaliações, como o LLM a recebe."""
+    return PROMPT.invoke(prompt_inputs(question, retrieval)).to_messages()[1].content
 
 
 def check_citations(answer: str, cited: list[int], total: int) -> tuple[list[int], tuple[int, ...]]:
@@ -152,10 +176,70 @@ def search_refusal_reason(retrieval: RetrievalResult) -> str:
     return f"A avaliação mais parecida com a pergunta teve similaridade {best}, abaixo do corte de {cut}."
 
 
+def _refuse_at_search(state: dict) -> RagResponse:
+    retrieval = state["retrieval"]
+    return RagResponse(state["question"], False, REFUSAL_MESSAGE, retrieval, refused_at="busca",
+                       refusal_reason=search_refusal_reason(retrieval))
+
+
+def _check_answer(state: dict) -> RagResponse:
+    """Barreiras 2 e 3: a recusa do próprio LLM e a conferência das citações."""
+    question, retrieval, output = state["question"], state["retrieval"], state["llm_output"]
+    raw, parsed = output["raw"], output["parsed"]
+    usage = raw.usage_metadata or {}
+    common = {
+        "model": raw.response_metadata.get("model_name"),
+        "input_tokens": usage.get("input_tokens", 0),
+        "output_tokens": usage.get("output_tokens", 0),
+        "user_prompt": state["messages"].to_messages()[1].content,
+    }
+
+    if parsed is None:  # o modelo não seguiu o formato estruturado
+        return RagResponse(question, False, REFUSAL_MESSAGE, retrieval, refused_at="llm",
+                           refusal_reason="A resposta do modelo veio fora do formato esperado.", **common)
+    if not parsed.answered:
+        return RagResponse(question, False, REFUSAL_MESSAGE, retrieval, refused_at="llm",
+                           refusal_reason=parsed.refusal_reason, **common)
+
+    valid, invalid = check_citations(parsed.answer, parsed.cited, len(retrieval.evidences))
+    if not valid:
+        return RagResponse(question, False, REFUSAL_MESSAGE, retrieval, refused_at="citacao",
+                           refusal_reason="A resposta não citou nenhuma avaliação existente.",
+                           invalid_citations=invalid, **common)
+
+    citations = [retrieval.evidences[n - 1] for n in valid]
+    return RagResponse(question, True, parsed.answer, retrieval, citations=citations,
+                       invalid_citations=invalid, **common)
+
+
+def build_chain(retriever: ReviewRetriever, llm: Runnable) -> Runnable:
+    """Monta a cadeia LCEL. Entrada: ``{question, k, filters, infer_filters}``; saída: ``RagResponse``."""
+    retrieve = RunnablePassthrough.assign(
+        retrieval=RunnableLambda(lambda state: retriever.search(
+            state["question"], k=state["k"], filters=state["filters"], infer_filters=state["infer_filters"]
+        ))
+    )
+    generate = (
+        RunnablePassthrough.assign(
+            messages=RunnableLambda(lambda state: prompt_inputs(state["question"], state["retrieval"])) | PROMPT
+        )
+        | RunnablePassthrough.assign(llm_output=itemgetter("messages") | llm)
+        | RunnableLambda(_check_answer)
+    )
+    gate = RunnableBranch(
+        (lambda state: not state["retrieval"].has_evidence, RunnableLambda(_refuse_at_search)),
+        generate,
+    )
+    return (retrieve | gate).with_config(run_name="rag_olist")
+
+
 class RagPipeline:
-    def __init__(self, retriever: ReviewRetriever, llm: LLMClient):
+    """Atalho para usar a cadeia com argumentos nomeados. A cadeia fica exposta em ``chain``."""
+
+    def __init__(self, retriever: ReviewRetriever, llm: Runnable):
         self.retriever = retriever
         self.llm = llm
+        self.chain = build_chain(retriever, llm)
 
     def ask(
         self,
@@ -164,27 +248,4 @@ class RagPipeline:
         filters: SearchFilters | None = None,
         infer_filters: bool = True,
     ) -> RagResponse:
-        retrieval = self.retriever.search(question, k=k, filters=filters, infer_filters=infer_filters)
-        if not retrieval.has_evidence:
-            return RagResponse(question, False, REFUSAL_MESSAGE, retrieval, refused_at="busca",
-                               refusal_reason=search_refusal_reason(retrieval))
-
-        user_prompt = build_user_prompt(question, retrieval)
-        output = self.llm.generate(SYSTEM_PROMPT, user_prompt)
-        parsed = output.parsed
-        usage = {"model": output.model, "input_tokens": output.input_tokens,
-                 "output_tokens": output.output_tokens, "user_prompt": user_prompt}
-
-        if not parsed.answered:
-            return RagResponse(question, False, REFUSAL_MESSAGE, retrieval, refused_at="llm",
-                               refusal_reason=parsed.refusal_reason, **usage)
-
-        valid, invalid = check_citations(parsed.answer, parsed.cited, len(retrieval.evidences))
-        if not valid:
-            return RagResponse(question, False, REFUSAL_MESSAGE, retrieval, refused_at="citacao",
-                               refusal_reason="A resposta não citou nenhuma avaliação existente.",
-                               invalid_citations=invalid, **usage)
-
-        citations = [retrieval.evidences[n - 1] for n in valid]
-        return RagResponse(question, True, parsed.answer, retrieval, citations=citations,
-                           invalid_citations=invalid, **usage)
+        return self.chain.invoke({"question": question, "k": k, "filters": filters, "infer_filters": infer_filters})

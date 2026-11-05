@@ -25,7 +25,7 @@ flowchart TD
     E6 --> E7["7. Recalibração e correções<br/>PR #11"]
     E7 --> E8["8. Documentação final<br/>PR #12"]
     E8 --> E9["Correção: pseudônimos de lojas<br/>PR #13"]
-    E9 --> E10["9. Adoção do LangChain<br/>PR #14"]
+    E9 --> E10["9. Adoção do LangChain<br/>PR #14 e #15"]
 
     E3 -.->|"Achado 1: o embedding confunde<br/>elogio com reclamação"| E4
     E3 -.->|"Achado 2: similaridades<br/>numa faixa estreita"| E4
@@ -56,6 +56,7 @@ As setas contínuas são a ordem das etapas. As tracejadas são as **realimenta�
 | #12 | 05/11/2026 | `docs/documentacao-final` | 8. Documentação | Este documento, arquitetura e README reorganizado |
 | #13 | 05/11/2026 | `fix/pseudonimos-lojas` | Correção | Instrução sobre os pseudônimos de lojas no prompt |
 | #14 | 05/11/2026 | `refactor/langchain-busca` | 9. Adoção do LangChain | Embeddings, índice e busca com os componentes do LangChain |
+| #15 | 05/11/2026 | `refactor/langchain-cadeia` | 9. Adoção do LangChain | Prompt, LLM e cadeia LCEL; comparação medida das duas vias |
 
 ## Etapas
 
@@ -130,7 +131,7 @@ Além de reorganizar a documentação, esta etapa conferiu as decisões da anál
 
 A decisão 8 da análise exploratória previa que o prompt explicasse que "lannister", "stark", "baratheon" e "targaryen" são pseudônimos que a Olist usou para anonimizar lojas parceiras. Antes de corrigir, medimos o efeito da falta da instrução com 5 perguntas sobre essas lojas: nenhuma resposta avisava que o nome era um pseudônimo. Depois da nova regra no prompt, as 5 avisavam. A avaliação completa foi refeita com os dois modelos, para confirmar que a mudança no prompt não piorou nenhuma outra métrica, e ganhou as 5 perguntas e uma verificação automática.
 
-### 9. Adoção do LangChain (PR #14)
+### 9. Adoção do LangChain (PR #14 e #15)
 
 **Objetivo:** reescrever o pipeline com os componentes do LangChain, sem mudar o comportamento.
 
@@ -139,6 +140,10 @@ A primeira versão não usava o LangChain, por uma decisão registrada no README
 A reescrita foi dividida em duas PRs. Esta primeira cobre os embeddings (um componente `Embeddings`), o índice (o `Chroma` do `langchain-chroma`, que reaproveita o índice existente sem reindexar) e a busca (um `BaseRetriever`). **Antes de mudar qualquer linha, gravamos uma linha de base:** as evidências exatas devolvidas para 89 perguntas (as 82 da calibração, as 5 sobre lojas e 2 casos especiais). A reescrita só foi aceita quando as 89 voltaram idênticas: mesmas avaliações, mesma ordem, mesmas similaridades e mesmas repetições. A gravação também foi verificada: a amostra, reindexada do zero pelo LangChain, reproduziu o experimento E5 × BM25 e a calibração.
 
 A primeira comparação deu diferença em todas as 89 perguntas, o que levou à descoberta 19.
+
+A segunda PR reescreveu o restante: o prompt como `ChatPromptTemplate`, o LLM como `ChatOpenAI` com `with_structured_output` e o fluxo como uma cadeia LCEL, com um `RunnableBranch` para a barreira da busca. Como o LLM não é totalmente determinístico, a verificação teve duas camadas. A primeira, determinística: as mensagens enviadas ao LLM nas 89 perguntas voltaram idênticas, caractere por caractere. A segunda, na avaliação completa: as 88 perguntas tiveram a mesma decisão nos dois modelos (176 de 176), com os tokens de entrada idênticos em todas.
+
+Com as duas versões completas e o comportamento comprovadamente igual, foi possível comparar as duas vias com medições: linhas de código, dependências, tempo, riscos e facilidade de evolução. A comparação está no README, em "Sem × com LangChain". Ela é um resultado do processo, e não estava planejada: a primeira versão não usou o LangChain por uma escolha técnica, e a comparação só existe porque essa escolha foi revista.
 
 ## Descobertas que mudaram o rumo
 

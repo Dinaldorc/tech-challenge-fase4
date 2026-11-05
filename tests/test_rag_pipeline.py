@@ -1,8 +1,11 @@
 import pytest
+from langchain_core.messages import AIMessage
+from langchain_core.runnables import Runnable, RunnableLambda
 
-from src.llm import LLMOutput, OpenAIClient, RagAnswer
+from src.llm import RagAnswer, build_llm
 from src.rag_pipeline import (
     FREQUENCY_NOTE,
+    PROMPT,
     REFUSAL_MESSAGE,
     SYSTEM_PROMPT,
     RagPipeline,
@@ -39,16 +42,20 @@ class StubRetriever:
         return self.result
 
 
-class FakeLLM:
-    model = "fake-llm"
+class FakeLLM(RunnableLambda):
+    """LLM falso no formato do ``with_structured_output(..., include_raw=True)``: registra as mensagens."""
 
-    def __init__(self, answer: RagAnswer):
+    def __init__(self, answer: RagAnswer | None):
         self.answer = answer
         self.prompts: list[tuple[str, str]] = []
+        super().__init__(self._respond)
 
-    def generate(self, system, user):
-        self.prompts.append((system, user))
-        return LLMOutput(self.answer, self.model, input_tokens=100, output_tokens=20)
+    def _respond(self, prompt_value):
+        messages = prompt_value.to_messages()
+        self.prompts.append((messages[0].content, messages[1].content))
+        raw = AIMessage(content="", response_metadata={"model_name": "fake-llm"},
+                        usage_metadata={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120})
+        return {"raw": raw, "parsed": self.answer, "parsing_error": None if self.answer else ValueError("formato")}
 
 
 def answer(text="", cited=(), answered=True, reason=""):
@@ -129,10 +136,10 @@ def test_system_prompt_covers_the_safety_rules():
 # ---- Cliente OpenAI ----------------------------------------------------------------------------
 
 
-def test_openai_client_requires_api_key(monkeypatch):
+def test_build_llm_requires_api_key(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "")  # vazio, e o .env não sobrescreve variáveis já definidas
     with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
-        OpenAIClient()
+        build_llm()
 
 
 @pytest.mark.parametrize(
@@ -172,3 +179,28 @@ def test_search_refusal_reason_explains_with_numbers():
     )
     empty = RetrievalResult("p", SearchFilters(categories=("x",)), 0.82, [], None)
     assert "filtros" in search_refusal_reason(empty)
+
+
+# ---- Cadeia do LangChain -----------------------------------------------------------------------
+
+
+def test_pipeline_exposes_a_langchain_chain():
+    pipeline = RagPipeline(StubRetriever(EVIDENCES), FakeLLM(answer("Atraso [1].", [1])))
+    assert isinstance(pipeline.chain, Runnable)
+    response = pipeline.chain.invoke({"question": "reclamações?", "k": 8, "filters": None, "infer_filters": True})
+    assert response.answered and response.citations[0].review_id == "a"
+
+
+def test_prompt_template_has_system_rules_and_context():
+    result = RetrievalResult("p", SearchFilters(sentiments=("negativo",)), 0.82, EVIDENCES, 0.9)
+    messages = PROMPT.invoke({"question": "Q?", "frequency_note": "", "filters": "sentimento: negativo",
+                              "count": 3, "evidences": "..."}).to_messages()
+    assert messages[0].content == SYSTEM_PROMPT
+    assert messages[1].content.startswith("Pergunta: Q?")
+    assert build_user_prompt("Q?", result).startswith("Pergunta: Q?\n\nFiltros aplicados na busca: sentimento: negativo")
+
+
+def test_answer_outside_the_structured_format_is_refused():
+    response = RagPipeline(StubRetriever(EVIDENCES), FakeLLM(None)).ask("reclamações?")
+    assert not response.answered and response.refused_at == "llm"
+    assert "formato" in response.refusal_reason
