@@ -25,6 +25,7 @@ flowchart TD
     E6 --> E7["7. Recalibração e correções<br/>PR #11"]
     E7 --> E8["8. Documentação final<br/>PR #12"]
     E8 --> E9["Correção: pseudônimos de lojas<br/>PR #13"]
+    E9 --> E10["9. Adoção do LangChain<br/>PR #14"]
 
     E3 -.->|"Achado 1: o embedding confunde<br/>elogio com reclamação"| E4
     E3 -.->|"Achado 2: similaridades<br/>numa faixa estreita"| E4
@@ -54,6 +55,7 @@ As setas contínuas são a ordem das etapas. As tracejadas são as **realimenta�
 | #11 | 04/11/2026 | `fix/perguntas-genericas` | 7. Correções | Recalibração com perguntas genéricas e instrução de frequência |
 | #12 | 05/11/2026 | `docs/documentacao-final` | 8. Documentação | Este documento, arquitetura e README reorganizado |
 | #13 | 05/11/2026 | `fix/pseudonimos-lojas` | Correção | Instrução sobre os pseudônimos de lojas no prompt |
+| #14 | 05/11/2026 | `refactor/langchain-busca` | 9. Adoção do LangChain | Embeddings, índice e busca com os componentes do LangChain |
 
 ## Etapas
 
@@ -128,6 +130,16 @@ Além de reorganizar a documentação, esta etapa conferiu as decisões da anál
 
 A decisão 8 da análise exploratória previa que o prompt explicasse que "lannister", "stark", "baratheon" e "targaryen" são pseudônimos que a Olist usou para anonimizar lojas parceiras. Antes de corrigir, medimos o efeito da falta da instrução com 5 perguntas sobre essas lojas: nenhuma resposta avisava que o nome era um pseudônimo. Depois da nova regra no prompt, as 5 avisavam. A avaliação completa foi refeita com os dois modelos, para confirmar que a mudança no prompt não piorou nenhuma outra métrica, e ganhou as 5 perguntas e uma verificação automática.
 
+### 9. Adoção do LangChain (PR #14)
+
+**Objetivo:** reescrever o pipeline com os componentes do LangChain, sem mudar o comportamento.
+
+A primeira versão não usava o LangChain, por uma decisão registrada no README: o fluxo é curto e precisava de controle fino. A decisão foi revista porque o LangChain foi estudado em profundidade no curso e é a referência de mercado para RAG. Os riscos conhecidos foram aceitos e tratados: as mudanças frequentes de API (versões fixadas no `requirements.txt`) e o risco de alterar sem perceber um comportamento já calibrado (teste de regressão).
+
+A reescrita foi dividida em duas PRs. Esta primeira cobre os embeddings (um componente `Embeddings`), o índice (o `Chroma` do `langchain-chroma`, que reaproveita o índice existente sem reindexar) e a busca (um `BaseRetriever`). **Antes de mudar qualquer linha, gravamos uma linha de base:** as evidências exatas devolvidas para 89 perguntas (as 82 da calibração, as 5 sobre lojas e 2 casos especiais). A reescrita só foi aceita quando as 89 voltaram idênticas: mesmas avaliações, mesma ordem, mesmas similaridades e mesmas repetições. A gravação também foi verificada: a amostra, reindexada do zero pelo LangChain, reproduziu o experimento E5 × BM25 e a calibração.
+
+A primeira comparação deu diferença em todas as 89 perguntas, o que levou à descoberta 19.
+
 ## Descobertas que mudaram o rumo
 
 Cada descoberta segue o mesmo formato: como apareceu, a evidência, o que mudou e onde está documentada em detalhe.
@@ -151,8 +163,10 @@ Cada descoberta segue o mesmo formato: como apareceu, a evidência, o que mudou 
 | 15 | 7 | Um texto da interface parecia um diagnóstico da pergunta | Revisão do grupo ao usar a interface | A regra sobre textos de baixa informação aparecia junto da recusa de "Qual a capital da França?" | Texto reescrito como "regras fixas da busca" e motivo da recusa com a similaridade e o corte |
 | 16 | 7 | Um dos modelos misturava palavras de outros alfabetos | Leitura das respostas da nova avaliação | `gpt-5.4-mini`: 6 de 83 respostas com georgiano, hindi, armênio ou hebraico; `gpt-4.1-mini`: nenhuma | Verificação automática na avaliação; reforçou a escolha do modelo |
 | 17 | 8 | Uma decisão da análise exploratória não chegou ao código | Conferência das decisões contra o código | A decisão 8 previa que o prompt explicasse que nomes como "lannister" e "stark" são pseudônimos de lojas; o prompt não tem essa instrução PR #13: regra no prompt. Antes, 0 de 5 respostas sobre lojas avisavam que o nome era um pseudônimo; depois, 5 de 5. A avaliação passou a verificar isso automaticamente |
+| 18 | 9 | A decisão de não usar o LangChain precisava ser revista | Avaliação do alinhamento do projeto com o curso | O LangChain foi estudado em profundidade no curso, e o projeto não demonstrava esse domínio | Reescrita com os componentes do framework, em duas PRs, com a regra de não mudar o comportamento |
+| 19 | 9 | Um método do LangChain devolve a distância, apesar do nome | Teste de regressão da reescrita | `similarity_search_by_vector_with_relevance_scores` devolveu 0,069 onde a similaridade era 0,931: as duas somam 1. As 89 perguntas deram diferença, e todas seriam recusadas na busca | Conversão explícita (1 − distância), com um teste automatizado que avisa se o comportamento do LangChain mudar |
 
-Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; e a 17 no item 5 de "Avaliação e escolha do modelo".
+Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; a 17 no item 5 de "Avaliação e escolha do modelo"; e as 18 e 19 em "Tecnologias e bibliotecas".
 
 ## O que o processo ensinou
 
@@ -163,6 +177,7 @@ Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e í
 5. **O olhar de quem usa encontra o que o teste automatizado não encontra.** As descobertas 12 e 15 vieram de membros do grupo usando a interface: os números estavam corretos, mas induziam a uma leitura errada.
 6. **Conferir as decisões contra o código.** A descoberta 17 mostra que uma decisão bem fundamentada na análise pode se perder no caminho até a implementação. A conferência explícita, no fim, é o que a encontra.
 7. **O que a avaliação não pergunta, ela não detecta.** Nenhuma das 82 perguntas da avaliação tocava nas lojas anonimizadas, e por isso nenhuma rodada encontrou o problema dos pseudônimos, assim como a primeira calibração não encontrou o das perguntas genéricas. Cada falha descoberta virou também uma pergunta nova na avaliação, para que não volte sem ser percebida.
+8. **Refatorar contra uma linha de base.** Uma reescrita que "parece funcionar" pode ter mudado o comportamento sem ninguém perceber. Gravar as saídas exatas antes de mudar o código e exigir que voltem idênticas transformou "acho que está igual" em "está igual em 89 de 89". Foi isso que pegou a armadilha da descoberta 19, que nenhum teste unitário com dados falsos teria encontrado.
 
 ## Pendências
 

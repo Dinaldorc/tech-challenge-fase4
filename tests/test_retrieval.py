@@ -6,14 +6,17 @@ import pytest
 from src.preprocessing import load_documents, normalize_for_comparison
 from src.retrieval import (
     Evidence,
-    Retriever,
+    ReviewRetriever,
     SearchFilters,
     build_where,
     deduplicate,
     infer_sentiment,
     parse_filters,
 )
-from src.vector_store import index_documents, open_collection
+from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
+
+from src.vector_store import index_documents, open_vector_store
 from tests.fakes import FakeEmbedder
 
 SAMPLE = Path(__file__).resolve().parents[1] / "data" / "sample" / "reviews_sample.csv"
@@ -109,9 +112,9 @@ def retriever(tmp_path):
     docs["text_norm"] = docs["text"].map(normalize_for_comparison)
 
     embedder = FakeEmbedder(symmetric=True)
-    collection = open_collection(tmp_path, embedder.model_name)
-    index_documents(collection, docs, embedder)
-    return Retriever(collection, embedder, min_similarity=0.0)
+    vector_store = open_vector_store(tmp_path, embedder)
+    index_documents(vector_store, docs)
+    return ReviewRetriever(vector_store=vector_store, min_similarity=0.0)
 
 
 def test_search_infers_sentiment_and_groups_repetitions(retriever):
@@ -171,10 +174,10 @@ def test_search_widens_window_when_repetitions_fill_it(tmp_path):
     docs["text"] = ["Não recebi o produto"] * 40 + [f"Comentário diferente {i}" for i in range(5)]
     docs["low_information"] = False
     embedder = FakeEmbedder(symmetric=True)
-    collection = open_collection(tmp_path, embedder.model_name)
-    index_documents(collection, docs, embedder)
+    vector_store = open_vector_store(tmp_path, embedder)
+    index_documents(vector_store, docs)
 
-    result = Retriever(collection, embedder, min_similarity=-1.0).search("Não recebi o produto", k=3, infer_filters=False)
+    result = ReviewRetriever(vector_store=vector_store, min_similarity=-1.0).search("Não recebi o produto", k=3, infer_filters=False)
     assert len(result.evidences) == 3
     assert result.evidences[0].text == "Não recebi o produto"
     assert result.evidences[0].mentions == 40
@@ -193,3 +196,29 @@ def test_parse_filters():
     assert parse_filters(None) == SearchFilters()
     with pytest.raises(ValueError):
         parse_filters("cor=azul")
+
+
+# ---- Interface do LangChain --------------------------------------------------------------------
+
+
+def test_retriever_is_a_langchain_component_and_returns_documents(retriever):
+    assert isinstance(retriever, BaseRetriever)
+    documents = retriever.invoke("Produto quebrado", infer_filters=False, k=2)
+    assert len(documents) == 2 and all(isinstance(d, Document) for d in documents)
+    top = documents[0]
+    assert top.page_content == "Produto quebrado"
+    assert top.metadata["similarity"] == pytest.approx(1.0, abs=1e-5)
+    assert top.metadata["mentions"] == 1
+
+
+def test_invoke_accepts_filters(retriever):
+    documents = retriever.invoke("qualquer coisa", filters=SearchFilters(sentiments=("positivo",)))
+    assert documents and {d.metadata["sentiment"] for d in documents} == {"positivo"}
+
+
+def test_evidence_round_trip_through_document():
+    evidence = Evidence("a", "texto", 0.9, {"review_score": 5}, ("b", "c"))
+    document = evidence.to_document()
+    assert document.id == "a" and document.metadata["mentions"] == 3
+    back = Evidence.from_document(document, 0.9)
+    assert back.review_id == "a" and back.text == "texto" and back.similarity == 0.9

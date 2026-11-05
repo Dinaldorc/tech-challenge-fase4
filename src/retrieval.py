@@ -1,5 +1,9 @@
 """Busca das avaliações que servem de evidência para responder a uma pergunta.
 
+A busca é um ``BaseRetriever`` do LangChain (``ReviewRetriever``): usada como componente do framework
+(``retriever.invoke(pergunta)``), devolve ``Document``s; usada pelo pipeline (``search``), devolve
+também o que a interface precisa para mostrar a seleção (candidatos, corte e melhor similaridade).
+
 Etapas de uma busca:
 
 1. **Filtros.** O usuário pode escolher nota, sentimento, status da entrega, categoria e período.
@@ -22,11 +26,17 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field, replace
 from datetime import date
+from pathlib import Path
 
-import chromadb
+from langchain_chroma import Chroma
+from langchain_core.callbacks import CallbackManagerForRetrieverRun
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
+from langchain_core.retrievers import BaseRetriever
 
-from src.embeddings import Embedder
+from src.embeddings import E5Embeddings
 from src.preprocessing import normalize_for_comparison
+from src.vector_store import DEFAULT_COLLECTION, open_vector_store
 
 # Calibrado na base completa (42.370 documentos) com scripts/calibrate_threshold.py, com 82 perguntas
 # específicas e genéricas, com e sem filtros: o maior corte que não recusa nenhuma pergunta legítima
@@ -146,6 +156,17 @@ class Evidence:
     def mentions(self) -> int:
         return 1 + len(self.duplicate_ids)
 
+    @classmethod
+    def from_document(cls, document: Document, similarity: float) -> Evidence:
+        return cls(review_id=document.id, text=document.page_content, similarity=similarity,
+                   metadata=dict(document.metadata))
+
+    def to_document(self) -> Document:
+        """A evidência como ``Document`` do LangChain, com a similaridade e as repetições nos metadados."""
+        metadata = {**self.metadata, "similarity": self.similarity, "mentions": self.mentions,
+                    "duplicate_ids": list(self.duplicate_ids)}
+        return Document(page_content=self.text, metadata=metadata, id=self.review_id)
+
 
 @dataclass(frozen=True)
 class RetrievalResult:
@@ -175,29 +196,26 @@ def deduplicate(candidates: list[Evidence]) -> list[Evidence]:
     return list(groups.values())
 
 
-class Retriever:
-    def __init__(
-        self,
-        collection: chromadb.Collection,
-        embedder: Embedder,
-        min_similarity: float = DEFAULT_MIN_SIMILARITY,
-    ):
-        self.collection = collection
-        self.embedder = embedder
-        self.min_similarity = min_similarity
+class ReviewRetriever(BaseRetriever):
+    """Retriever do LangChain sobre o índice de avaliações, com filtros, repetições agrupadas e corte."""
+
+    vector_store: Chroma
+    min_similarity: float = DEFAULT_MIN_SIMILARITY
+    k: int = DEFAULT_K
 
     def search(
         self,
         question: str,
-        k: int = DEFAULT_K,
+        k: int | None = None,
         filters: SearchFilters | None = None,
         infer_filters: bool = True,
     ) -> RetrievalResult:
+        k = k or self.k
         filters = filters or SearchFilters()
         if infer_filters and filters.sentiments is None and filters.review_scores is None:
             filters = replace(filters, sentiments=infer_sentiment(question))
 
-        query_vector = self.embedder.embed_query(question)
+        query_vector = self.vector_store.embeddings.embed_query(question)
         where = build_where(filters)
         n_results = k * CANDIDATE_FACTOR
         while True:
@@ -214,10 +232,34 @@ class Retriever:
         return RetrievalResult(question, filters, self.min_similarity, evidences[:k], best, grouped)
 
     def _query(self, query_vector: list[float], n_results: int, where: dict | None) -> list[Evidence]:
-        response = self.collection.query(query_embeddings=[query_vector], n_results=n_results, where=where)
-        return [
-            Evidence(review_id=review_id, text=text, similarity=1 - distance, metadata=metadata)
-            for review_id, text, distance, metadata in zip(
-                response["ids"][0], response["documents"][0], response["distances"][0], response["metadatas"][0]
-            )
-        ]
+        # Atenção: apesar do nome, no langchain-chroma este método devolve a DISTÂNCIA do Chroma, e não a
+        # similaridade (só o método que recebe o texto da pergunta aplica a conversão). O índice usa
+        # distância cosseno (src/vector_store.py), então a similaridade é 1 - distância. O teste de
+        # regressão da reescrita para o LangChain pegou isso: sem a conversão, toda pergunta era recusada.
+        results = self.vector_store.similarity_search_by_vector_with_relevance_scores(
+            query_vector, k=n_results, filter=where
+        )
+        return [Evidence.from_document(document, 1.0 - distance) for document, distance in results]
+
+    def _get_relevant_documents(
+        self,
+        query: str,
+        *,
+        run_manager: CallbackManagerForRetrieverRun,
+        k: int | None = None,
+        filters: SearchFilters | None = None,
+        infer_filters: bool = True,
+    ) -> list[Document]:
+        result = self.search(query, k=k, filters=filters, infer_filters=infer_filters)
+        return [evidence.to_document() for evidence in result.evidences]
+
+
+def load_retriever(
+    persist_dir: Path,
+    embeddings: Embeddings | None = None,
+    collection: str = DEFAULT_COLLECTION,
+    min_similarity: float = DEFAULT_MIN_SIMILARITY,
+) -> ReviewRetriever:
+    """Monta o retriever sobre um índice já gravado. Sem ``embeddings``, carrega o modelo E5."""
+    vector_store = open_vector_store(persist_dir, embeddings or E5Embeddings(), collection)
+    return ReviewRetriever(vector_store=vector_store, min_similarity=min_similarity)

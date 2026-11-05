@@ -154,6 +154,7 @@ A descrição completa, com o fluxo de construção da base, o papel de cada mó
 | matplotlib, scikit-learn, Jupyter | Análise exploratória: gráficos, Bag of Words e TF-IDF | [Análise exploratória](#análise-exploratória) |
 | sentence-transformers + PyTorch | Execução local do modelo de embeddings | [Embeddings e índice](#embeddings-e-índice-vetorial) |
 | `intfloat/multilingual-e5-base` | Modelo de embeddings: multilíngue, treinado para busca, sem custo por chamada | [Embeddings e índice](#embeddings-e-índice-vetorial) |
+| LangChain (`langchain-core`, `langchain-chroma`) | Estrutura do pipeline: o embedder é um componente `Embeddings`, o índice é acessado pelo `Chroma` do LangChain e a busca é um `BaseRetriever` | [docs/processo.md](docs/processo.md), etapa 9 |
 | ChromaDB | Banco vetorial embutido, com persistência em disco e filtros por metadados | [Embeddings e índice](#embeddings-e-índice-vetorial) |
 | rank-bm25 | Linha de base lexical no experimento E5 × BM25 | [Achado 1](#achado-1-a-busca-acerta-o-assunto-mas-confunde-elogio-com-reclamação) |
 | OpenAI (`gpt-4.1-mini`, Responses API) | Geração da resposta, com saída estruturada | [Resposta com o LLM](#resposta-com-o-llm) |
@@ -161,7 +162,7 @@ A descrição completa, com o fluxo de construção da base, o papel de cada mó
 | Streamlit | Interface web | [Interface](#interface) |
 | pytest | Testes automatizados | [Testes](#testes) |
 
-**Avaliado e não usado: LangChain.** O fluxo do projeto é curto (busca, contexto, resposta) e precisava de controle fino em pontos que o framework abstrai: os prefixos `passage:` e `query:` do E5, a janela adaptativa de candidatos, a saída estruturada e a conferência das citações. Escrito diretamente, cada passo fica visível no código e na interface, o que também atende à exigência do desafio de demonstrar cada etapa. Para não fechar essa porta, o gerador de embeddings segue a mesma interface das `Embeddings` do LangChain (`embed_documents` e `embed_query`).
+**LangChain: uma decisão revista.** A primeira versão do projeto não usava o LangChain. O fluxo é curto e precisava de controle fino em pontos que o framework abstrai: os prefixos do E5, a janela adaptativa de candidatos e a conferência das citações. A decisão foi revista porque o LangChain foi estudado em profundidade no curso e é a referência de mercado para RAG, e o projeto deve demonstrar esse domínio. A reescrita seguiu uma regra: **mudar a estrutura sem mudar o comportamento.** A lógica calibrada e avaliada continua a mesma, agora dentro dos componentes do framework, e cada etapa da reescrita só foi aceita depois de reproduzir exatamente os resultados anteriores. Na primeira etapa (embeddings, índice e busca), as 89 perguntas da avaliação devolveram as mesmas avaliações, com as mesmas similaridades. Esse teste encontrou uma armadilha do `langchain-chroma`: o método `similarity_search_by_vector_with_relevance_scores` devolve a distância, e não a similaridade que o nome sugere. Sem a comparação, todas as perguntas seriam recusadas. A cadeia de resposta (prompt, LLM e conferência das citações) é a etapa seguinte da reescrita. Detalhes em [docs/processo.md](docs/processo.md).
 
 ## Estrutura do repositório
 
@@ -198,7 +199,7 @@ A descrição completa, com o fluxo de construção da base, o papel de cada mó
 
 ## Como o projeto foi construído
 
-O projeto foi construído em nove etapas, da organização do repositório à documentação, cada uma numa branch e numa pull request revisada pelo grupo. Toda decisão relevante foi comparada com alternativas e, sempre que possível, medida. Quando uma descoberta exigiu corrigir algo já mesclado, a correção ganhou uma PR própria. O histórico mostra o erro e a correção, em vez de escondê-los.
+O projeto foi construído em dez etapas, da organização do repositório à adoção do LangChain, cada uma numa branch e numa pull request revisada pelo grupo. Toda decisão relevante foi comparada com alternativas e, sempre que possível, medida. Quando uma descoberta exigiu corrigir algo já mesclado, a correção ganhou uma PR própria. O histórico mostra o erro e a correção, em vez de escondê-los.
 
 | Etapa | PR | O que entregou |
 | --- | --- | --- |
@@ -212,15 +213,16 @@ O projeto foi construído em nove etapas, da organização do repositório à do
 | 7. Correções | #11 | Recalibração com perguntas genéricas e instrução para perguntas de frequência |
 | 8. Documentação | #12 | Arquitetura, processo e este README |
 | Correção | #13 | Instrução sobre os pseudônimos de lojas, decisão da análise exploratória que não tinha chegado ao código |
+| 9. Adoção do LangChain | #14 | Embeddings, índice e busca reescritos com os componentes do LangChain, com os mesmos resultados |
 
-Ao longo do caminho, 17 descobertas mudaram o rumo do projeto. Quatro exemplos:
+Ao longo do caminho, 19 descobertas mudaram o rumo do projeto. Quatro exemplos:
 
 - **O embedding confunde elogio com reclamação** (etapa 3). "Entrega atrasada" trazia "entregue no prazo". O experimento mostrou que o BM25 erra do mesmo jeito, e a correção veio dos metadados: o filtro pela nota do cliente.
 - **O critério de "maior acerto" recusava perguntas legítimas** (etapa 4). Como a recusa na busca é irreversível e o aceite indevido ainda passa pelo LLM, o critério passou a ser não recusar nenhuma pergunta legítima.
 - **Perguntas genéricas eram recusadas** (etapa 8 → 7). Os exemplos reais da documentação mostraram que o conjunto de calibração não tinha perguntas genéricas, justamente o caso de uso principal. O conjunto foi ampliado e o corte, recalibrado.
 - **Um modelo misturava palavras de outros alfabetos** (etapa 7). Com métricas de segurança iguais, a leitura das respostas revelou o defeito no `gpt-5.4-mini` e decidiu a escolha do modelo.
 
-O processo completo, com a linha do tempo, o detalhe de cada etapa, as 17 descobertas e as lições metodológicas, está em [docs/processo.md](docs/processo.md).
+O processo completo, com a linha do tempo, o detalhe de cada etapa, as 19 descobertas e as lições metodológicas, está em [docs/processo.md](docs/processo.md).
 
 ## Decisões técnicas por etapa
 
@@ -278,8 +280,8 @@ O tamanho da amostra e a semente podem ser alterados com `--sample-size` e `--se
 
 Nesta etapa, cada avaliação vira um vetor numérico (*embedding*) que representa o seu significado, e os vetores são gravados num índice que permite encontrar os comentários mais parecidos com uma pergunta. A busca entende significado, não só palavras: "produto chegou quebrado" encontra "Produto veio com defeito", sem nenhuma palavra em comum além de "produto".
 
-- [src/embeddings.py](src/embeddings.py): gera os embeddings com o modelo `intfloat/multilingual-e5-base`.
-- [src/vector_store.py](src/vector_store.py): cria e preenche o índice no ChromaDB, com os metadados de cada avaliação.
+- [src/embeddings.py](src/embeddings.py): componente `Embeddings` do LangChain que gera os embeddings com o modelo `intfloat/multilingual-e5-base`.
+- [src/vector_store.py](src/vector_store.py): abre o índice pelo `Chroma` do LangChain (`langchain-chroma`) e grava cada avaliação como um `Document`, com os metadados.
 - [scripts/build_index.py](scripts/build_index.py): monta o índice a partir da base preparada.
 - [scripts/compare_search.py](scripts/compare_search.py): reproduz a comparação entre E5 e BM25 descrita no Achado 1.
 
@@ -415,7 +417,7 @@ Sobre os prefixos: numa comparação rápida com cinco perguntas, tirar o `query
 
 ## Busca das evidências
 
-O módulo [src/retrieval.py](src/retrieval.py) recebe a pergunta e devolve as avaliações que servem de evidência para a resposta, ou informa que não há evidência suficiente. Ele aplica as consequências dos três achados da etapa anterior, em quatro passos:
+O módulo [src/retrieval.py](src/retrieval.py) recebe a pergunta e devolve as avaliações que servem de evidência para a resposta, ou informa que não há evidência suficiente. A busca é um `BaseRetriever` do LangChain (`ReviewRetriever`): usada como componente do framework, com `retriever.invoke(pergunta)`, ela devolve `Document`s. Ele aplica as consequências dos três achados da etapa anterior, em quatro passos:
 
 1. **Filtros.** O usuário pode filtrar por nota, sentimento, status da entrega, categoria e período. Se ele não escolher o sentimento, a busca tenta inferi-lo da pergunta.
 2. **Similaridade.** A pergunta vira embedding e o Chroma devolve os comentários mais próximos dentro dos filtros. Os textos de baixa informação ficam de fora por padrão (Achado 3).

@@ -4,14 +4,19 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.embeddings import E5Embedder, as_passage, as_query
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
+
+from src.embeddings import E5Embeddings, as_passage, as_query
 from src.preprocessing import load_documents
 from src.vector_store import (
     EmbeddingModelMismatchError,
     document_metadata,
+    count_documents,
     index_documents,
     iter_batches,
-    open_collection,
+    open_vector_store,
+    to_documents,
 )
 from tests.fakes import FakeEmbedder
 
@@ -42,9 +47,9 @@ class _RecordingModel:
         return np.ones((len(texts), 4)) / 2
 
 
-def _embedder_with(model) -> E5Embedder:
+def _embedder_with(model) -> E5Embeddings:
     # Evita o __init__ para não baixar o modelo: testa só como o embedder chama o SentenceTransformer.
-    embedder = object.__new__(E5Embedder)
+    embedder = object.__new__(E5Embeddings)
     embedder.model_name, embedder.batch_size, embedder._model = "fake", 16, model
     return embedder
 
@@ -59,6 +64,10 @@ def test_e5_embedder_applies_prefixes_and_normalizes():
     assert model.inputs == ["passage: produto ótimo", "passage: não chegou", "query: atraso"]
     assert model.kwargs["normalize_embeddings"] is True
     assert len(documents) == 2 and len(query) == 4
+
+
+def test_e5_is_a_langchain_embeddings_component():
+    assert issubclass(E5Embeddings, Embeddings)
 
 
 # ---- Metadados ----------------------------------------------------------------------------------
@@ -87,19 +96,31 @@ def test_iter_batches():
         list(iter_batches([1], 0))
 
 
+# ---- Documentos do LangChain -------------------------------------------------------------------
+
+
+def test_to_documents_uses_review_id_and_raw_text(docs):
+    documents = to_documents(docs.head(3))
+    first = docs.iloc[0]
+    assert all(isinstance(document, Document) for document in documents)
+    assert documents[0].id == first["review_id"]
+    assert documents[0].page_content == first["text"]
+    assert documents[0].metadata == document_metadata(first)
+
+
 # ---- Índice -------------------------------------------------------------------------------------
 
 
 def test_index_is_idempotent_and_keeps_raw_text(tmp_path, docs):
     embedder = FakeEmbedder()
-    collection = open_collection(tmp_path, embedder.model_name)
+    vector_store = open_vector_store(tmp_path, embedder)
 
-    assert index_documents(collection, docs, embedder, batch_size=7) == len(docs)
-    index_documents(collection, docs, embedder, batch_size=7)  # segunda vez: atualiza, não duplica
+    assert index_documents(vector_store, docs, batch_size=7) == len(docs)
+    index_documents(vector_store, docs, batch_size=7)  # segunda vez: atualiza, não duplica
 
-    assert collection.count() == len(docs)
+    assert count_documents(vector_store) == len(docs)
     first = docs.iloc[0]
-    stored = collection.get(ids=[first["review_id"]])
+    stored = vector_store.get(ids=[first["review_id"]])
     # O prefixo "passage:" só entra no embedding; o texto guardado é o que o cliente escreveu.
     assert stored["documents"] == [first["text"]]
     assert stored["metadatas"][0]["review_score"] == int(first["review_score"])
@@ -107,41 +128,45 @@ def test_index_is_idempotent_and_keeps_raw_text(tmp_path, docs):
 
 
 def test_index_skips_empty_text(tmp_path, docs):
-    embedder = FakeEmbedder()
-    collection = open_collection(tmp_path, embedder.model_name)
+    vector_store = open_vector_store(tmp_path, FakeEmbedder())
     with_empty = docs.head(3).copy()
     with_empty.loc[with_empty.index[0], "text"] = "   "
-    assert index_documents(collection, with_empty, embedder) == 2
+    assert index_documents(vector_store, with_empty) == 2
 
 
-def test_collection_uses_cosine_and_finds_same_text(tmp_path, docs):
+def test_index_uses_cosine_and_langchain_returns_distance(tmp_path, docs):
     embedder = FakeEmbedder()
-    collection = open_collection(tmp_path, embedder.model_name)
-    index_documents(collection, docs, embedder)
-    assert collection.configuration["hnsw"]["space"] == "cosine"
+    vector_store = open_vector_store(tmp_path, embedder)
+    index_documents(vector_store, docs)
+    assert vector_store._collection.configuration["hnsw"]["space"] == "cosine"
 
     target = docs.iloc[3]
-    result = collection.query(query_embeddings=[embedder.vector(as_passage(target["text"]))], n_results=1)
-    assert result["ids"][0][0] == target["review_id"]
-    assert result["distances"][0][0] == pytest.approx(0.0, abs=1e-5)
+    results = vector_store.similarity_search_by_vector_with_relevance_scores(
+        embedder.vector(as_passage(target["text"])), k=1
+    )
+    document, score = results[0]
+    assert document.id == target["review_id"]
+    # Apesar do nome do método, o valor é a distância (0 para o texto idêntico), e não a similaridade.
+    # A busca (src/retrieval.py) converte com 1 - distância; este teste avisa se o LangChain mudar.
+    assert score == pytest.approx(0.0, abs=1e-5)
 
 
 def test_metadata_filters(tmp_path, docs):
-    embedder = FakeEmbedder()
-    collection = open_collection(tmp_path, embedder.model_name)
-    index_documents(collection, docs, embedder)
+    vector_store = open_vector_store(tmp_path, FakeEmbedder())
+    index_documents(vector_store, docs)
 
-    negatives = collection.get(where={"sentiment": "negativo"})
+    negatives = vector_store.get(where={"sentiment": "negativo"})
     assert len(negatives["ids"]) == int((docs["sentiment"] == "negativo").sum())
     assert all(meta["review_score"] <= 2 for meta in negatives["metadatas"])
 
 
 def test_reopening_with_another_model_fails(tmp_path, docs):
-    collection = open_collection(tmp_path, "fake-model")
-    index_documents(collection, docs.head(2), FakeEmbedder())
+    vector_store = open_vector_store(tmp_path, FakeEmbedder())
+    index_documents(vector_store, docs.head(2))
 
+    other = FakeEmbedder(model_name="outro-modelo")
     with pytest.raises(EmbeddingModelMismatchError):
-        open_collection(tmp_path, "outro-modelo")
+        open_vector_store(tmp_path, other)
 
-    rebuilt = open_collection(tmp_path, "outro-modelo", reset=True)
-    assert rebuilt.count() == 0
+    rebuilt = open_vector_store(tmp_path, other, reset=True)
+    assert count_documents(rebuilt) == 0

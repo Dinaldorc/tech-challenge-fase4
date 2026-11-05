@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 
 from src.llm import LLMClient
 from src.preprocessing import normalize_for_comparison
-from src.retrieval import DEFAULT_K, Evidence, RetrievalResult, Retriever, SearchFilters
+from src.retrieval import DEFAULT_K, Evidence, RetrievalResult, ReviewRetriever, SearchFilters
 
 REFUSAL_MESSAGE = "Não encontrei avaliações de clientes que permitam responder a essa pergunta."
 
@@ -153,7 +153,7 @@ def search_refusal_reason(retrieval: RetrievalResult) -> str:
 
 
 class RagPipeline:
-    def __init__(self, retriever: Retriever, llm: LLMClient):
+    def __init__(self, retriever: ReviewRetriever, llm: LLMClient):
         self.retriever = retriever
         self.llm = llm
 

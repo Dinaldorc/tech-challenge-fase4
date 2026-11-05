@@ -19,7 +19,7 @@ flowchart LR
     B --> C["data/processed/<br/>reviews_docs.parquet<br/>42.370 documentos"]
     B --> D["data/sample/<br/>reviews_sample.csv<br/>3.000 documentos"]
     C --> E["src/embeddings.py<br/>multilingual-e5-base<br/>prefixo passage:"]
-    E --> F["src/vector_store.py<br/>ChromaDB, cosseno<br/>texto + vetor + metadados"]
+    E --> F["src/vector_store.py<br/>Chroma do LangChain, cosseno<br/>um Document por avaliação"]
     F --> G[("chroma_db/<br/>205 MB")]
 ```
 
@@ -40,7 +40,7 @@ Cada avaliação vira **um documento**: título e comentário juntos, sem divis�
 flowchart TD
     Q["Pergunta do usuário<br/>+ filtros da barra lateral"] --> P["Processamento da pergunta<br/>infere o sentimento quando ela pede<br/>reclamações ou elogios"]
     P --> V["Embedding da pergunta<br/>multilingual-e5-base, prefixo query:"]
-    V --> R["Recuperação no ChromaDB<br/>filtros de metadados + similaridade de cosseno<br/>sem textos de baixa informação"]
+    V --> R["Recuperação: ReviewRetriever (BaseRetriever)<br/>filtros de metadados + similaridade de cosseno<br/>sem textos de baixa informação"]
     R --> S["Seleção<br/>agrupa textos repetidos<br/>janela adaptativa de candidatos"]
     S --> B1{"Barreira 1<br/>alguma evidência com<br/>similaridade ≥ 0,82?"}
     B1 -- não --> X1["Recusa sem chamar o LLM"]
@@ -59,8 +59,8 @@ O enunciado do desafio descreve o fluxo esperado em sete etapas. A tabela mostra
 | --- | --- | --- |
 | Pergunta do usuário | `app.py`, `scripts/ask.py` | Campo de texto, exemplos e filtros |
 | Processamento da pergunta | `src/retrieval.py`: `infer_sentiment`, `build_where` | Inferência do sentimento e conversão dos filtros para a consulta do Chroma |
-| Representação vetorial | `src/embeddings.py`: `E5Embedder.embed_query` | Embedding da pergunta com o prefixo `query:` |
-| Recuperação das avaliações | `src/retrieval.py`: `Retriever.search` | Busca por similaridade de cosseno dentro dos filtros |
+| Representação vetorial | `src/embeddings.py`: `E5Embeddings.embed_query` (componente `Embeddings` do LangChain) | Embedding da pergunta com o prefixo `query:` |
+| Recuperação das avaliações | `src/retrieval.py`: `ReviewRetriever.search` (um `BaseRetriever` do LangChain sobre o `Chroma`) | Busca por similaridade de cosseno dentro dos filtros |
 | Construção do contexto | `src/rag_pipeline.py`: `build_user_prompt`, `format_evidence` | Avaliações numeradas, com metadados, e instruções do sistema |
 | Geração da resposta | `src/llm.py`: `OpenAIClient.generate` | Responses API com saída estruturada (`RagAnswer`) |
 | Resposta fundamentada | `src/rag_pipeline.py`: `RagPipeline.ask`, `check_citations` | Conferência das citações e montagem da resposta com as evidências |
@@ -70,9 +70,9 @@ O enunciado do desafio descreve o fluxo esperado em sete etapas. A tabela mostra
 | Arquivo | Responsabilidade |
 | --- | --- |
 | [src/preprocessing.py](../src/preprocessing.py) | Lê os CSVs, monta um documento por avaliação, limpa o texto, cria a versão normalizada para comparação, marca os textos de baixa informação e junta os metadados do pedido |
-| [src/embeddings.py](../src/embeddings.py) | Gera os embeddings E5, com os prefixos `passage:` e `query:` e vetores normalizados |
-| [src/vector_store.py](../src/vector_store.py) | Cria e abre a coleção no Chroma, grava documentos em lotes com `upsert` e impede reabrir o índice com outro modelo de embeddings |
-| [src/retrieval.py](../src/retrieval.py) | Filtros, inferência do sentimento, busca, agrupamento de repetições e corte de similaridade |
+| [src/embeddings.py](../src/embeddings.py) | Componente `Embeddings` do LangChain: gera os embeddings E5, com os prefixos `passage:` e `query:` e vetores normalizados |
+| [src/vector_store.py](../src/vector_store.py) | Abre o índice pelo `Chroma` do LangChain, converte as avaliações em `Document`s, grava em lotes com `upsert` e impede reabrir o índice com outro modelo de embeddings |
+| [src/retrieval.py](../src/retrieval.py) | `ReviewRetriever`, um `BaseRetriever` do LangChain: filtros, inferência do sentimento, busca, agrupamento de repetições e corte de similaridade |
 | [src/llm.py](../src/llm.py) | Cliente da OpenAI e o formato estruturado da resposta |
 | [src/rag_pipeline.py](../src/rag_pipeline.py) | Prompt, fluxo completo com as três barreiras e conferência das citações |
 | [app.py](../app.py) | Interface em Streamlit, com a resposta, as evidências e as etapas do pipeline |
@@ -118,6 +118,6 @@ As dependências vão sempre das peças básicas para as compostas: `vector_stor
 A organização em módulos com interfaces pequenas permite evoluir partes isoladas:
 
 - **Outro provedor de LLM** (Claude, por exemplo): basta uma classe com o método `generate`, sem mudar o pipeline.
-- **Outro banco vetorial** (Qdrant, pgvector): a troca fica restrita a `src/vector_store.py` e à consulta em `src/retrieval.py`.
+- **Outro banco vetorial** (Qdrant, pgvector): basta outra implementação de `VectorStore` do LangChain, com a troca restrita a `src/vector_store.py` e à consulta em `src/retrieval.py`.
 - **Busca híbrida** (E5 + BM25): um segundo recuperador combinado em `src/retrieval.py`.
 - **Análises quantitativas** (frequência por tema): um módulo novo que lê a base de documentos e os embeddings, sem passar pelo fluxo de resposta.

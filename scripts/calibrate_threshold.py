@@ -35,9 +35,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.embeddings import DEFAULT_MODEL, E5Embedder  # noqa: E402
-from src.retrieval import Retriever, parse_filters  # noqa: E402
-from src.vector_store import DEFAULT_COLLECTION, open_collection  # noqa: E402
+from src.retrieval import load_retriever, parse_filters  # noqa: E402
+from src.vector_store import count_documents  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -66,9 +65,9 @@ def main() -> None:
     position = questions.groupby(["in_domain", "kind"]).cumcount()
     questions["split"] = np.where(position % 2 == 0, "calibracao", "validacao")
 
-    collection = open_collection(args.persist_dir, DEFAULT_MODEL, DEFAULT_COLLECTION)
-    retriever = Retriever(collection, E5Embedder(), min_similarity=0.0)
-    print(f"Índice: {args.persist_dir} ({collection.count():,} documentos)".replace(",", "."))
+    retriever = load_retriever(args.persist_dir, min_similarity=0.0)
+    total = count_documents(retriever.vector_store)
+    print(f"Índice: {args.persist_dir} ({total:,} documentos)".replace(",", "."))
 
     rows = []
     for question in questions.itertuples():
