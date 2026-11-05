@@ -18,6 +18,9 @@ langchain-chroma>=1.1,<2
 # LLM
 openai>=3.0,<4
 langchain-openai>=1.7,<2
+
+# Analises quantitativas
+duckdb>=1.5,<2
 python-dotenv>=1.0
 
 # Interface
