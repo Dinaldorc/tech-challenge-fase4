@@ -28,6 +28,8 @@ flowchart TD
     E9 --> E10["9. Adoção do LangChain<br/>PR #14 e #15"]
     E10 --> E11["10. Frequência por tema<br/>PR #16 e #17"]
     E11 --> E12["Identidade visual<br/>PR #18"]
+    E12 --> E13["Revisão contra o enunciado<br/>PR #21"]
+    E13 -.->|"'principais' e 'mais elogiam'<br/>passam a ser frequência"| E11
     E5 -.->|"a busca não mede frequência:<br/>contar à parte"| E11
 
     E3 -.->|"Achado 1: o embedding confunde<br/>elogio com reclamação"| E4
@@ -63,6 +65,9 @@ As setas contínuas são a ordem das etapas. As tracejadas são as **realimenta�
 | #16 | 05/11/2026 | `feature/temas-frequencia` | 10. Frequência por tema | Agrupamento testado, classificação pelo LLM, contagens com DuckDB |
 | #17 | 05/11/2026 | `feature/temas-na-interface` | 10. Frequência por tema | Visão Panorama e contagem real nas respostas a perguntas de frequência |
 | #18 | 06/11/2026 | `feature/visual-noturno` | Identidade visual | Tema escuro com destaque magenta, cores conferidas por contraste e paletas validadas |
+| #19 | 06/11/2026 | `docs/roteiro-video` | Documentação | Roteiro do vídeo e Pydantic declarado nas dependências |
+| #20 | 06/11/2026 | `docs/autores` | Documentação | Identificação dos autores e do grupo |
+| #21 | 06/11/2026 | `fix/sintonia-enunciado` | Revisão contra o enunciado | Valores ausentes explícitos, detector de frequência ampliado, exemplo de exploração de volta e mapa de correspondência |
 
 ## Etapas
 
@@ -193,8 +198,9 @@ Cada descoberta segue o mesmo formato: como apareceu, a evidência, o que mudou 
 | 24 | 10 | Perguntas de frequência genéricas eram recusadas na busca | Teste real da contagem nas respostas | "Quais os problemas mais comuns?", na categoria móveis, não tinha nenhuma avaliação acima do corte, embora a contagem respondesse a ela | Sem evidência acima do corte, as perguntas de frequência de reclamações usam exemplos dos temas mais frequentes, marcados como tal na tela |
 | 25 | 10 | Mudar as regras gerais do prompt afetou outras perguntas | Avaliação ampliada com perguntas de frequência | Com as regras de porcentagem alteradas, a armadilha "horário dos Correios" foi respondida em 1 de 5 execuções; com as originais, em 0 de 5 | A exceção passou para a instrução enviada só nas perguntas de frequência; o prompt de sistema voltou a ser idêntico, e as 89 mensagens da linha de base, exceto as de frequência, voltaram idênticas |
 | 26 | Visual | A cor de destaque escolhida não dava contraste para texto nos botões | Cálculo do contraste antes de aplicar o tema | O magenta neon dava 3,5:1 com texto branco, abaixo do mínimo de 4,5:1; o validador também reprovou a primeira paleta (cores indistinguíveis para daltonismo) e a primeira escala do mapa de calor (tom mais fraco sumindo no fundo) | Dois tons de magenta: um mais fechado nos botões (4,6:1) e o neon nos gráficos (5,5:1 sobre o fundo); paleta e escala refeitas até passarem em todas as verificações |
+| 27 | Revisão | Perguntas do enunciado com "principais" e "mais elogiam" não eram tratadas como perguntas de frequência | Conferência de cada exigência do enunciado contra o sistema | "O que os clientes mais elogiam?" foi respondida com um ranking tirado de 8 avaliações; "Quais são os principais problemas?" não recebia a contagem. A mesma revisão encontrou o tratamento de valores ausentes sem uma seção própria, um exemplo de exploração do enunciado fora das demonstrações e o filtro de período usando a data da avaliação, e não a da compra | Detector ampliado (13 perguntas da avaliação passaram a receber a contagem), seção de valores ausentes, exemplo de volta e mapa de correspondência; a data da compra fica para a PR seguinte |
 
-Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; a 17 no item 5 de "Avaliação e escolha do modelo"; as 18 e 19 em "Tecnologias e bibliotecas"; as de 20 a 25 em "Frequência por tema"; e a 26 em "Identidade visual".
+Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; a 17 no item 5 de "Avaliação e escolha do modelo"; as 18 e 19 em "Tecnologias e bibliotecas"; as de 20 a 25 em "Frequência por tema"; a 26 em "Identidade visual"; e a 27 em "As contagens no sistema".
 
 ## O que o processo ensinou
 

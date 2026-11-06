@@ -47,6 +47,8 @@ EXAMPLES = [
     ("Problemas de entrega", "O que os clientes relatam sobre problemas relacionados à entrega?"),
     ("O que é elogiado", "Quais aspectos da experiência de compra são mais elogiados pelos clientes?"),
     ("Padrões dos insatisfeitos", "Quais padrões podem ser identificados nas avaliações de clientes insatisfeitos?"),
+    ("Avaliações que sustentam", "Quais avaliações sustentam a conclusão de que existem problemas recorrentes "
+                                 "relacionados ao prazo de entrega?"),
     ("Reclamações mais frequentes", "Quais reclamações relacionadas à entrega aparecem com maior frequência?"),
     ("Fora do tema (recusa)", "Qual a capital da França?"),
 ]
@@ -451,9 +453,9 @@ def show_ask(pipeline: RagPipeline, options: dict) -> None:
     filters, k = sidebar_filters(options)
 
     st.markdown("**Exemplos:**")
-    columns = st.columns(3)
+    columns = st.columns(4)
     for i, (short, example) in enumerate(EXAMPLES):
-        if columns[i % 3].button(short, key=f"example-{i}", width="stretch", help=example):
+        if columns[i % 4].button(short, key=f"example-{i}", width="stretch", help=example):
             st.session_state["question"] = example
             st.session_state["ask_now"] = True
 
