@@ -24,6 +24,7 @@ Tech Challenge da Fase 4 da Pós Tech FIAP. O enunciado está em [docs/](docs/).
 - Decisões técnicas por etapa: [Dados](#dados) · [Análise exploratória](#análise-exploratória) · [Preparo da base](#preparo-da-base-de-documentos) · [Embeddings e índice](#embeddings-e-índice-vetorial) · [Busca](#busca-das-evidências) · [Resposta com o LLM](#resposta-com-o-llm) · [Frequência por tema](#frequência-por-tema) · [Interface](#interface)
 - [Limitações e próximos passos](#limitações-e-próximos-passos)
 - [Testes](#testes)
+- [Autor(es)](#autores)
 
 ## Como executar
 
@@ -914,3 +915,14 @@ Os testes usam um gerador de embeddings falso e determinístico e um LLM falso, 
 ## Licença dos dados
 
 A base é publicada pela Olist sob [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) e é redistribuída aqui para fins acadêmicos e não comerciais, com atribuição à fonte original.
+
+## Autor(es)
+
+- Afonso Augusto Santana Sales Rios (RM 373057)
+- Bruno Macedo da Silva (RM 374187)
+- Dinaldo Ribeiro de Carvalho (RM 370350)
+- Luís Gustavo Juliano de França (RM 371599)
+
+**Grupo:** 128  
+**Data:** 11/2026  
+**Atualizado em:** 06/11/2026
