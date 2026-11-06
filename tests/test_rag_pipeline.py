@@ -153,7 +153,13 @@ def test_build_llm_requires_api_key(monkeypatch):
         ("quais os problemas mais comuns?", True),
         ("Quantos clientes recomendam a loja?", True),
         ("qual a proporção de insatisfeitos?", True),
-        ("Quais são os principais problemas relatados pelos clientes?", False),
+        ("Quais são os principais problemas relatados pelos clientes?", True),
+        ("O que os clientes mais elogiam em suas experiências de compra?", True),
+        ("O que os consumidores mais valorizam?", True),
+        ("Quais aspectos da compra são mais elogiados?", True),
+        ("A entrega foi principalmente rápida?", False),
+        ("Existem padrões recorrentes nas avaliações?", False),
+        ("como fazer uma reclamação no Procon?", False),
         ("o que os clientes elogiam?", False),
     ],
 )
@@ -171,7 +177,7 @@ def test_response_keeps_prompt_and_retrieval_keeps_candidates():
 def test_frequency_question_gets_note_in_prompt():
     result = RetrievalResult("p", SearchFilters(), 0.82, EVIDENCES, 0.9)
     frequency = build_user_prompt("Quais reclamações aparecem com maior frequência?", result)
-    regular = build_user_prompt("Quais as principais reclamações?", result)
+    regular = build_user_prompt("O que os clientes relatam sobre a entrega?", result)
     assert FREQUENCY_NOTE in frequency
     assert FREQUENCY_NOTE not in regular
 

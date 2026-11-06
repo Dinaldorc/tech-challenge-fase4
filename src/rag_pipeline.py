@@ -69,11 +69,14 @@ exemplo "a loja identificada pelo pseudônimo lannister", e não faça referênc
 
 CITATION = re.compile(r"\[(\d+)\]")
 
-# Perguntas que pedem contagem ou proporção ("com maior frequência", "quantos", "a maioria").
+# Perguntas que pedem contagem, proporção ou ranking ("com maior frequência", "quantos", "a maioria",
+# "os principais", "o que mais elogiam"). As duas últimas formas aparecem no próprio enunciado e pedem
+# uma ordem por frequência, mesmo sem a palavra "frequência".
 # A busca semântica traz os comentários mais parecidos com a pergunta, e não uma amostra
 # representativa: ela mostra exemplos, mas não mede frequência (README, "Resposta com o LLM").
 FREQUENCY_INTENT = re.compile(
-    r"\b(frequen\w*|mais comu\w*|quant[oa]s|porcentag\w*|percentua\w*|proporc\w*|maioria|ranking)\b"
+    r"\b(frequen\w*|mais comu\w*|quant[oa]s|porcentag\w*|percentua\w*|proporc\w*|maioria|ranking"
+    r"|principa(?:l|is)|mais (?:elogi\w*|valoriz\w*|reclam\w*|recorrent\w*|mencion\w*|citad\w*|apont\w*))\b"
 )
 
 

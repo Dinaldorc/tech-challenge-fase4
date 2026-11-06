@@ -15,6 +15,7 @@ Tech Challenge da Fase 4 da Pós Tech FIAP. O enunciado está em [docs/](docs/).
 
 ## Sumário
 
+- [Correspondência com o enunciado](#correspondência-com-o-enunciado)
 - [Como executar](#como-executar)
 - [Exemplos de perguntas e respostas](#exemplos-de-perguntas-e-respostas)
 - [Arquitetura](#arquitetura)
@@ -25,6 +26,33 @@ Tech Challenge da Fase 4 da Pós Tech FIAP. O enunciado está em [docs/](docs/).
 - [Limitações e próximos passos](#limitações-e-próximos-passos)
 - [Testes](#testes)
 - [Autor(es)](#autores)
+
+## Correspondência com o enunciado
+
+Onde cada exigência do [enunciado do desafio](docs/) é atendida.
+
+| Exigência | Onde está |
+| --- | --- |
+| Fluxo do RAG (pergunta, processamento, embeddings, recuperação, contexto, geração, resposta fundamentada) | [docs/arquitetura.md](docs/arquitetura.md), com uma tabela que liga cada etapa ao código |
+| **1. Base de conhecimento:** seleção dos dados | [Dados](#dados), [Preparo da base](#preparo-da-base-de-documentos) |
+| Limpeza e preparação dos textos | [Preparo da base](#preparo-da-base-de-documentos), [Análise exploratória](#análise-exploratória) |
+| Tratamento de valores ausentes | [Tratamento de valores ausentes](#tratamento-de-valores-ausentes) |
+| Organização dos documentos | [Preparo da base](#preparo-da-base-de-documentos): um documento por avaliação, sem *chunking* |
+| Criação dos embeddings | [Embeddings e índice vetorial](#embeddings-e-índice-vetorial) |
+| Armazenamento e indexação | [Embeddings e índice vetorial](#embeddings-e-índice-vetorial) |
+| **2. Pipeline RAG:** transformação da pergunta, recuperação semântica, seleção, contexto e geração | [Busca das evidências](#busca-das-evidências), [Resposta com o LLM](#resposta-com-o-llm); na interface, as abas de "Como a resposta foi construída" |
+| **3. Respostas fundamentadas em evidências** | [Resposta com o LLM](#resposta-com-o-llm): citações [n], conferência automática e cartões das avaliações citadas |
+| **4. Perguntas sem evidências suficientes** (sem avaliações relevantes, evidência insuficiente, fora do escopo) | [Três barreiras contra respostas sem base](#três-barreiras-contra-respostas-sem-base), [Calibração do corte de recusa](#calibração-do-corte-de-recusa) |
+| Exemplos de exploração do enunciado | [Exemplos de perguntas e respostas](#exemplos-de-perguntas-e-respostas) e os botões de exemplo da interface |
+| **Desafio adicional:** metadados e justificativa de como melhoram a recuperação | [Achado 1](#achado-1-a-busca-acerta-o-assunto-mas-confunde-elogio-com-reclamação), [Interface](#interface) |
+| **Repositório:** código, instalação e execução | [Como executar](#como-executar), [Estrutura do repositório](#estrutura-do-repositório) |
+| Arquitetura | [Arquitetura](#arquitetura), [docs/arquitetura.md](docs/arquitetura.md) |
+| Tecnologias e bibliotecas | [Tecnologias e bibliotecas](#tecnologias-e-bibliotecas) |
+| Estratégia do pipeline RAG e justificativa das decisões | As seções de [Decisões técnicas por etapa](#decisões-técnicas-por-etapa), cada uma com as alternativas avaliadas |
+| Exemplos de perguntas e respostas | [Exemplos de perguntas e respostas](#exemplos-de-perguntas-e-respostas) |
+| Reprodução da solução | [Como executar](#como-executar), com a tabela de experimentos reproduzíveis |
+| **Vídeo de apresentação** | [docs/roteiro-video.md](docs/roteiro-video.md), com a correspondência entre os itens exigidos e os trechos |
+| Critérios esperados (relevância, contexto, coerência, evitar informação sem base, rastreabilidade, reconhecer limites) | [Avaliação e escolha do modelo](#avaliação-e-escolha-do-modelo): 92 perguntas, com as métricas de cada critério |
 
 ## Como executar
 
@@ -79,20 +107,20 @@ python scripts/ask.py "quais as principais reclamações?" --category moveis_dec
 
 Respostas reais do sistema, com o modelo `gpt-4.1-mini`, sobre a base completa. As citações foram encurtadas aqui; na interface, cada uma aparece num cartão com o texto completo, a nota, a categoria, a entrega e a data.
 
-**1. Investigação de reclamações**, pergunta do enunciado, sem filtro. O sistema inferiu o sentimento negativo pela palavra "problemas".
+**1. Investigação de reclamações**, pergunta do enunciado, sem filtro. O sistema inferiu o sentimento negativo pela palavra "problemas" e, como "os principais" pede uma ordem por frequência, usou a contagem real dos temas.
 
 > **Quais são os principais problemas relatados pelos clientes?**
 >
-> As avaliações negativas indicam que os principais problemas relatados pelos clientes são: entrega incompleta ou não realizada, com produtos que constam como entregues mas não foram recebidos, ou pedidos cancelados por indisponibilidade [1][4][7]; atrasos significativos na entrega, chegando a até 14 dias de atraso [2][3][5][8]; falta de consideração, atenção e respeito no atendimento ao cliente, incluindo dificuldade de contato e diálogo com o vendedor [2][3][4][5][8]; envio de produtos errados, indicando falhas na conferência dos pedidos [6].
+> As avaliações negativas analisadas (10.836 no total) indicam que os principais problemas relatados pelos clientes são: não recebimento do produto, com 3.476 avaliações (32,1%), exemplificado por relatos de produtos não entregues ou entregues parcialmente [1][3][4][7]; atendimento sem resposta, com 2.273 avaliações (21,0%), refletido em queixas sobre falta de consideração e dificuldade de diálogo com o vendedor [2][8]; entrega parcial, com 1.773 avaliações (16,4%), como no caso de entrega de apenas parte do pedido [1]; produto errado ou diferente do anunciado, com 1.760 avaliações (16,2%), evidenciado por envio de produtos errados [6] (...)
 >
 > [1] ★☆☆☆☆ cool stuff: "Em partes. Sou cliente há anos, porém sempre há divergências e problemas na entrega, consta como produto entregue, porém foi entregue apenas 1 produto..."
-> [6] ★★☆☆☆ esporte lazer: "Como podem mandar um produto errado? Não existe conferências? Loja falha"
+> [4] ★☆☆☆☆ brinquedos: "Produto não foi entregue. Não foi enviada nota fiscal. Telefone para reclamação não funciona."
 
-**2. Busca por experiências positivas**, pergunta do enunciado. O sentimento positivo foi inferido pela palavra "elogiados". Mesmo com a regra contra generalizar, o modelo escreveu "menções frequentes" com base em 8 avaliações: a regra reduz esse risco, mas não o elimina (ver [Avaliação e escolha do modelo](#avaliação-e-escolha-do-modelo)).
+**2. Busca por experiências positivas**, pergunta do enunciado. O sentimento positivo foi inferido pela palavra "elogiados". Os elogios ainda não têm contagem por tema, então a resposta descreve o que as avaliações mostram, sem ordenar por frequência, e diz isso no fim.
 
 > **Quais aspectos da experiência de compra são mais elogiados pelos clientes?**
 >
-> As avaliações positivas destacam principalmente a entrega no prazo ou antes do prazo como um aspecto muito elogiado da experiência de compra, com menções frequentes à rapidez e pontualidade na entrega [2][3][4][5][7][8]. Além disso, a qualidade dos produtos é ressaltada, com clientes mencionando produtos originais, de excelente qualidade e que correspondem ao anúncio [1][3][4][6]. O atendimento e a negociação segura também são citados positivamente, assim como a satisfação geral com a compra e a recomendação da loja [2][5][7][8].
+> As avaliações destacam aspectos positivos como a entrega no prazo ou antes do prazo previsto, o que é mencionado em várias avaliações [2][3][4][5][7][8]. A qualidade dos produtos também é elogiada, com referências a produtos originais e de excelente qualidade [3][4][6]. Além disso, há menções à satisfação com o atendimento e a negociação segura, bem como à agilidade na compra [2][5]. Por fim, o preço justo é citado como um fator de satisfação em uma avaliação [3]. Medir a frequência exata desses aspectos exige contar todas as avaliações da base inteira.
 >
 > [3] ★★★★★ perfumaria: "Produto original+Preço justo+Entrega rápida = cliente satisfeito."
 
@@ -131,6 +159,14 @@ Os números estão corretos, mas o modelo citou atraso (15,7%) antes de entrega 
 > Não encontrei avaliações de clientes que permitam responder a essa pergunta.
 >
 > Motivo: a avaliação mais parecida com a pergunta teve similaridade 0,788, abaixo do corte de 0,82.
+
+**7. Exploração baseada em evidências**, pergunta do enunciado. O sentimento negativo foi inferido pela palavra "problemas".
+
+> **Quais avaliações sustentam a conclusão de que existem problemas recorrentes relacionados ao prazo de entrega?**
+>
+> As avaliações indicam problemas recorrentes relacionados ao prazo de entrega, com diversos clientes relatando atrasos que variam de 3 a 22 dias, como nas avaliações [1], [3], [5], [6] e [7]. Há também menções gerais à demora na entrega, mesmo em casos em que o prazo foi cumprido, como nas avaliações [2], [4] e [8]. (...)
+
+Cada número leva a um cartão com o texto original da avaliação, a nota, a categoria, o status e os dias de atraso da entrega: a conclusão pode ser conferida avaliação por avaliação.
 
 **Um limite que os exemplos também mostram.** Com o filtro de entrega atrasada, a pergunta "Quais temas aparecem nas avaliações?" trouxe sobretudo comentários sobre o próprio ato de avaliar ("Avaliar o quê se ainda não recebi o produto?"). A palavra "avaliações" na pergunta aproximou a busca de comentários que falam em "avaliar". Perguntas genéricas funcionam melhor quando nomeiam o que se procura ("quais reclamações...", "o que os clientes elogiam...").
 
@@ -266,8 +302,10 @@ O projeto foi construído em onze etapas, da organização do repositório à me
 | 9. Adoção do LangChain | #14, #15 | Pipeline inteiro reescrito com os componentes do LangChain, com os mesmos resultados comprovados, e a comparação medida das duas vias |
 | 10. Frequência por tema | #16, #17 | Temas das reclamações medidos (agrupamento testado e descartado para contar, classificação pelo LLM validada de duas formas) e levados à interface e às respostas |
 | Identidade visual | #18 | Tema escuro com destaque magenta, cores conferidas por contraste e paletas validadas para o fundo escuro |
+| Roteiro do vídeo e autores | #19, #20 | Roteiro cronometrado do vídeo, Pydantic declarado nas dependências e identificação do grupo |
+| Revisão contra o enunciado | #21 | Conferência de cada exigência; valores ausentes explícitos, perguntas de "principais" e "mais elogiam" com contagem ou sem ranking, mapa de correspondência |
 
-Ao longo do caminho, 26 descobertas mudaram o rumo do projeto. Cinco exemplos:
+Ao longo do caminho, 27 descobertas mudaram o rumo do projeto. Cinco exemplos:
 
 - **O embedding confunde elogio com reclamação** (etapa 3). "Entrega atrasada" trazia "entregue no prazo". O experimento mostrou que o BM25 erra do mesmo jeito, e a correção veio dos metadados: o filtro pela nota do cliente.
 - **O critério de "maior acerto" recusava perguntas legítimas** (etapa 4). Como a recusa na busca é irreversível e o aceite indevido ainda passa pelo LLM, o critério passou a ser não recusar nenhuma pergunta legítima.
@@ -275,7 +313,7 @@ Ao longo do caminho, 26 descobertas mudaram o rumo do projeto. Cinco exemplos:
 - **O agrupamento automático não serve para contar temas** (etapa 10). As reclamações formam um contínuo e misturam vários temas na mesma avaliação. O agrupamento passou a servir só para descobrir os temas, e a contagem foi feita por classificação, validada contra uma referência independente e contra os dados do pedido.
 - **Um modelo misturava palavras de outros alfabetos** (etapa 7). Com métricas de segurança iguais, a leitura das respostas revelou o defeito no `gpt-5.4-mini` e decidiu a escolha do modelo.
 
-O processo completo, com a linha do tempo, o detalhe de cada etapa, as 26 descobertas e as lições metodológicas, está em [docs/processo.md](docs/processo.md).
+O processo completo, com a linha do tempo, o detalhe de cada etapa, as 27 descobertas e as lições metodológicas, está em [docs/processo.md](docs/processo.md).
 
 ## Decisões técnicas por etapa
 
@@ -315,6 +353,22 @@ O módulo [src/preprocessing.py](src/preprocessing.py) aplica as decisões da an
 - **Metadados**: nota, sentimento (negativo 1–2, neutro 3, positivo 4–5), status do pedido, status e dias de atraso da entrega, categoria do produto e datas.
   - Status da entrega: `no_prazo`, `atrasado` e, para os pedidos sem data de entrega, `entregue_sem_data`, `enviado_nao_recebido`, `nao_enviado` ou `cancelado_indisponivel`.
   - Categoria: a do primeiro item do pedido, ou `sem_itens` (pedido sem nenhum item) e `desconhecida` (produto sem categoria cadastrada).
+
+### Tratamento de valores ausentes
+
+Cada tipo de dado ausente recebeu um tratamento próprio, decidido na análise exploratória (seções 2.1, 8 e 9.1 do notebook). Os números abaixo são da base completa.
+
+| Situação | Quantidade | Tratamento | Por quê |
+| --- | --- | --- | --- |
+| Avaliação sem título e sem comentário | 56.537 linhas (57% da tabela de avaliações) | Fica fora da base de documentos | Não há texto para recuperar nem citar como evidência |
+| Avaliação só com título | 1.737 | Mantida: o título vira o texto do documento | Títulos negativos são evidência direta ("Não recebi o produto"), e excluí-los retiraria sobretudo elogios de uma base que já tem negativas em excesso |
+| Avaliação só com comentário | 31.121 | Mantida, sem título | O comentário é o próprio conteúdo |
+| Pedido sem itens (sem produto, categoria ou loja) | 510 documentos | Mantido, com a categoria explícita `sem_itens`; as tabelas são unidas com *left join* | São pedidos reais e pagos, quase todos cancelados ou de produto indisponível, e 81% das avaliações são negativas: o texto é evidência das falhas mais graves |
+| Produto sem categoria cadastrada | 616 documentos | Categoria explícita `desconhecida` | Não perder a avaliação e não confundir esse caso com o pedido sem itens |
+| Pedido sem data de entrega ao cliente | 1.871 documentos | Status da entrega pela etapa em que o pedido parou: `cancelado_indisponivel` (802), `enviado_nao_recebido` (639), `nao_enviado` (425) e `entregue_sem_data` (5) | A mesma ausência tem significados diferentes: um pedido cancelado e um pedido enviado e não recebido não são o mesmo problema |
+| Dias de atraso, nesses mesmos pedidos | 1.871 documentos | Campo omitido nos metadados, em vez de preenchido com zero | Zero diria "entregue no prazo", o que seria falso; além disso, o Chroma não aceita valores nulos |
+| Avaliação sem pedido correspondente | Nenhuma na base atual | Status `desconhecido` e categoria `desconhecida`, já previstos no código | Robustez: uma versão futura da base não derruba o preparo |
+| Texto sem conteúdo ("ok", ".", "10") | 426 documentos | Mantido, marcado como baixa informação e excluído da busca por padrão | Não é um valor ausente, mas também não traz informação; esses textos atraíam perguntas fora do tema (Achado 3) |
 
 Para gerar a base:
 
@@ -772,6 +826,8 @@ A contagem por tema chega ao usuário por dois caminhos.
 **2. As respostas a perguntas de frequência.** Quando a pergunta pede frequência, proporção ou ranking de **reclamações** (com o sentimento negativo inferido ou escolhido), o contexto enviado ao LLM ganha uma **contagem real**: o total de avaliações e a porcentagem de cada tema, calculados com os mesmos filtros da busca. As avaliações encontradas continuam como exemplos citados. Duas proteções acompanham os números:
 - **A exceção fica restrita a essas perguntas.** A regra geral do prompt continua proibindo porcentagens, e só a instrução enviada nas perguntas de frequência diz que "esta contagem é a única exceção, copiada exatamente". Uma primeira versão alterou as regras gerais do prompt, e a avaliação mostrou uma armadilha ("qual o horário de funcionamento dos Correios?") sendo respondida em 1 de 5 execuções, contra 0 de 5 com as regras originais. Com a exceção restrita, o prompt de sistema voltou a ser idêntico ao anterior, e as mensagens das 89 perguntas da linha de base, exceto as de frequência, voltaram idênticas.
 - **O código confere os números.** Toda porcentagem escrita na resposta é comparada com as da contagem enviada. Uma porcentagem que não está lá aparece como alerta na tela e é contada na avaliação.
+
+**Quais perguntas recebem a contagem.** A conferência contra o enunciado mostrou que as perguntas de frequência nem sempre usam a palavra "frequência". O enunciado pergunta "quais são os **principais** problemas?" e "o que os clientes **mais elogiam**?", e essas formas não eram reconhecidas: a primeira recebia exemplos sem números, e a segunda era respondida com um ranking tirado de 8 avaliações ("os clientes mais elogiam a entrega no prazo..."). O detector passou a reconhecer também "principal" ou "principais" e "mais" seguido de um verbo de avaliação (elogiam, valorizam, reclamam, citam, mencionam, apontam). A linha de base confirmou que só as 10 perguntas com essas palavras mudaram de comportamento. Com isso, 13 perguntas da avaliação passaram a receber a contagem real, sem nenhuma porcentagem fora dela, e as de elogio passaram a descrever os exemplos sem ranquear.
 
 Se a busca não encontra nenhuma avaliação acima do corte numa pergunta de frequência de reclamações ("Quais os problemas mais comuns?", na categoria móveis, por exemplo), a pergunta não é mais recusada: a contagem responde a ela, e as evidências passam a ser **exemplos dos temas mais frequentes**, escolhidos pela classificação. A tela indica que esses exemplos não vieram da busca por similaridade. Para perguntas de frequência sobre elogios, que ainda não têm contagem, o comportamento anterior continua: exemplos, sem ranking, com um aviso.
 
