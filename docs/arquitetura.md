@@ -32,7 +32,7 @@ Cada avaliação vira **um documento**: título e comentário juntos, sem divis�
 
 - o **vetor** de 768 dimensões, usado na busca;
 - o **texto original** (com limpeza leve), mostrado como evidência;
-- os **metadados**: nota, sentimento, status do pedido e da entrega, dias de atraso, categoria do produto, data e a marca de baixa informação. São usados nos filtros e na citação.
+- os **metadados**: nota, sentimento, status do pedido e da entrega, dias de atraso, categoria do produto, datas da compra e da avaliação e a marca de baixa informação. São usados nos filtros (o período usa a data da compra) e na citação.
 
 ## Fluxo 2: resposta a uma pergunta
 
@@ -73,7 +73,7 @@ Executado uma vez, à parte do fluxo de perguntas. Mede quanto cada problema apa
 flowchart LR
     A["Avaliações negativas<br/>10.836"] --> B["src/themes.py<br/>LLM classifica em 12 temas<br/>lotes de 50, vários temas por avaliação"]
     B --> C[("data/themes/<br/>negative_themes.csv<br/>versionado")]
-    C --> D["src/analytics.py<br/>DuckDB: contagens por tema,<br/>categoria, período, entrega e nota"]
+    C --> D["src/analytics.py<br/>DuckDB: contagens por tema,<br/>categoria, período da compra,<br/>entrega e nota"]
     E["data/processed/<br/>reviews_docs.parquet"] --> D
     D --> F["app.py: visão Panorama"]
     D --> G["src/rag_pipeline.py: contagem real<br/>nas perguntas de frequência"]
@@ -93,7 +93,7 @@ Os temas foram descobertos antes por agrupamento automático (`scripts/compare_c
 | [src/retrieval.py](../src/retrieval.py) | `ReviewRetriever`, um `BaseRetriever` do LangChain: filtros, inferência do sentimento, busca, agrupamento de repetições e corte de similaridade |
 | [src/llm.py](../src/llm.py) | O `ChatOpenAI` do LangChain e o formato estruturado da resposta |
 | [src/themes.py](../src/themes.py) | Lista de temas das reclamações, com definições, e a cadeia que classifica avaliações em lotes com saída estruturada |
-| [src/analytics.py](../src/analytics.py) | Contagens por tema, categoria, período, status da entrega e nota, em SQL com DuckDB |
+| [src/analytics.py](../src/analytics.py) | Contagens por tema, categoria, período da compra, status da entrega e nota, em SQL com DuckDB |
 | [src/rag_pipeline.py](../src/rag_pipeline.py) | O `ChatPromptTemplate` e a cadeia LCEL com as três barreiras: busca, `RunnableBranch` da recusa, prompt, LLM e conferência das citações |
 | [app.py](../app.py) | Interface em Streamlit, com duas visões: Perguntar (resposta, evidências e etapas do pipeline) e Panorama (frequência dos temas das reclamações) |
 

@@ -28,9 +28,10 @@ flowchart TD
     E9 --> E10["9. Adoção do LangChain<br/>PR #14 e #15"]
     E10 --> E11["10. Frequência por tema<br/>PR #16 e #17"]
     E11 --> E12["Identidade visual<br/>PR #18"]
-    E12 --> E13["Revisão contra o enunciado<br/>PR #21"]
+    E12 --> E13["Revisão contra o enunciado<br/>PR #21 e #22"]
     E13 -.->|"'principais' e 'mais elogiam'<br/>passam a ser frequência"| E11
     E5 -.->|"a busca não mede frequência:<br/>contar à parte"| E11
+    E13 -.->|"reindexação: a busca aproximada<br/>perdia vizinhos"| E3
 
     E3 -.->|"Achado 1: o embedding confunde<br/>elogio com reclamação"| E4
     E3 -.->|"Achado 2: similaridades<br/>numa faixa estreita"| E4
@@ -68,6 +69,7 @@ As setas contínuas são a ordem das etapas. As tracejadas são as **realimenta�
 | #19 | 06/11/2026 | `docs/roteiro-video` | Documentação | Roteiro do vídeo e Pydantic declarado nas dependências |
 | #20 | 06/11/2026 | `docs/autores` | Documentação | Identificação dos autores e do grupo |
 | #21 | 06/11/2026 | `fix/sintonia-enunciado` | Revisão contra o enunciado | Valores ausentes explícitos, detector de frequência ampliado, exemplo de exploração de volta e mapa de correspondência |
+| #22 | 06/11/2026 | `feature/data-da-compra` | Revisão contra o enunciado | Período filtrado pela data da compra; base reindexada, busca quase exata (`ef_search` = 10.000) e corte recalibrado (continuou em 0,82) |
 
 ## Etapas
 
@@ -166,6 +168,12 @@ Antes de classificar a base inteira, um piloto com 300 avaliações mediu o cust
 
 A segunda PR levou as contagens ao sistema: a visão Panorama na interface e a contagem real no contexto das perguntas de frequência sobre reclamações, com a conferência automática das porcentagens. Os testes reais revelaram uma recusa indevida em perguntas de frequência genéricas com filtro (descoberta 24), e a avaliação ampliada revelou que mudar as regras gerais do prompt afetava outras perguntas (descoberta 25).
 
+### Revisão contra o enunciado (PR #21 e #22)
+
+**Objetivo:** conferir cada exigência do enunciado contra o sistema e a documentação.
+
+A conferência encontrou sete pontos (descoberta 27). A PR #21 corrigiu os que não mexiam no índice: perguntas com "principais" e "mais elogiam" passaram a ser tratadas como perguntas de frequência, os valores ausentes ganharam uma seção própria e a documentação ganhou um mapa de correspondência com o enunciado. A PR #22 trocou o filtro de período, que usava a data da avaliação, pela data da compra, como o enunciado pede. Isso exigiu reindexar a base, e o teste de regressão da busca, refeito depois da reindexação, revelou que a busca aproximada do Chroma perdia vizinhos (descoberta 28). A busca passou a quase exata, e o corte foi recalibrado antes de seguir: continuou em 0,82. A avaliação completa, refeita em seguida, mostrou o outro lado da melhora: com evidências mais próximas, o LLM passou a responder, às vezes, uma das armadilhas (descoberta 29).
+
 ## Descobertas que mudaram o rumo
 
 Cada descoberta segue o mesmo formato: como apareceu, a evidência, o que mudou e onde está documentada em detalhe.
@@ -198,9 +206,11 @@ Cada descoberta segue o mesmo formato: como apareceu, a evidência, o que mudou 
 | 24 | 10 | Perguntas de frequência genéricas eram recusadas na busca | Teste real da contagem nas respostas | "Quais os problemas mais comuns?", na categoria móveis, não tinha nenhuma avaliação acima do corte, embora a contagem respondesse a ela | Sem evidência acima do corte, as perguntas de frequência de reclamações usam exemplos dos temas mais frequentes, marcados como tal na tela |
 | 25 | 10 | Mudar as regras gerais do prompt afetou outras perguntas | Avaliação ampliada com perguntas de frequência | Com as regras de porcentagem alteradas, a armadilha "horário dos Correios" foi respondida em 1 de 5 execuções; com as originais, em 0 de 5 | A exceção passou para a instrução enviada só nas perguntas de frequência; o prompt de sistema voltou a ser idêntico, e as 89 mensagens da linha de base, exceto as de frequência, voltaram idênticas |
 | 26 | Visual | A cor de destaque escolhida não dava contraste para texto nos botões | Cálculo do contraste antes de aplicar o tema | O magenta neon dava 3,5:1 com texto branco, abaixo do mínimo de 4,5:1; o validador também reprovou a primeira paleta (cores indistinguíveis para daltonismo) e a primeira escala do mapa de calor (tom mais fraco sumindo no fundo) | Dois tons de magenta: um mais fechado nos botões (4,6:1) e o neon nos gráficos (5,5:1 sobre o fundo); paleta e escala refeitas até passarem em todas as verificações |
-| 27 | Revisão | Perguntas do enunciado com "principais" e "mais elogiam" não eram tratadas como perguntas de frequência | Conferência de cada exigência do enunciado contra o sistema | "O que os clientes mais elogiam?" foi respondida com um ranking tirado de 8 avaliações; "Quais são os principais problemas?" não recebia a contagem. A mesma revisão encontrou o tratamento de valores ausentes sem uma seção própria, um exemplo de exploração do enunciado fora das demonstrações e o filtro de período usando a data da avaliação, e não a da compra | Detector ampliado (13 perguntas da avaliação passaram a receber a contagem), seção de valores ausentes, exemplo de volta e mapa de correspondência; a data da compra fica para a PR seguinte |
+| 27 | Revisão | Perguntas do enunciado com "principais" e "mais elogiam" não eram tratadas como perguntas de frequência | Conferência de cada exigência do enunciado contra o sistema | "O que os clientes mais elogiam?" foi respondida com um ranking tirado de 8 avaliações; "Quais são os principais problemas?" não recebia a contagem. A mesma revisão encontrou o tratamento de valores ausentes sem uma seção própria, um exemplo de exploração do enunciado fora das demonstrações e o filtro de período usando a data da avaliação, e não a da compra | Detector ampliado (13 perguntas da avaliação passaram a receber a contagem), seção de valores ausentes, exemplo de volta e mapa de correspondência; a data da compra entrou no índice e nos filtros na PR #22 |
+| 28 | Revisão | A busca do índice era aproximada e perdia vizinhos | Teste de regressão da busca depois de reindexar a base com a data da compra | Com os mesmos vetores, 18 das 89 perguntas mudaram de evidências. Contra a busca exata, o índice recuperava em média 81% dos 32 melhores candidatos e errava a melhor similaridade em 25% das perguntas | `ef_search` de 100 para 10.000: recall de 99,8% nas perguntas legítimas, sem custo de tempo perceptível; corte recalibrado, mantido em 0,82, e nenhuma decisão de recusa alterada |
+| 29 | Revisão | Evidências melhores levaram o LLM a responder uma armadilha | Avaliação completa depois da busca quase exata | "qual o horário de funcionamento dos Correios?" passou a trazer uma queixa sobre o horário de atendimento dos Correios; com a mesma mensagem repetida 30 vezes, o `gpt-4.1-mini` respondeu em 5 (com as evidências antigas, em 0 de 30) | Resultado registrado na avaliação (35 de 36 fora do tema recusadas); ajuste da instrução do LLM numa PR própria, medido contra a linha de base |
 
-Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; a 17 no item 5 de "Avaliação e escolha do modelo"; as 18 e 19 em "Tecnologias e bibliotecas"; as de 20 a 25 em "Frequência por tema"; a 26 em "Identidade visual"; e a 27 em "As contagens no sistema".
+Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; a 17 no item 5 de "Avaliação e escolha do modelo"; as 18 e 19 em "Tecnologias e bibliotecas"; as de 20 a 25 em "Frequência por tema"; a 26 em "Identidade visual"; a 27 em "As contagens no sistema"; a 28 em "Busca quase exata"; e a 29 no item 6 de "Avaliação e escolha do modelo".
 
 ## O que o processo ensinou
 
@@ -214,11 +224,13 @@ Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e í
 8. **Refatorar contra uma linha de base.** Uma reescrita que "parece funcionar" pode ter mudado o comportamento sem ninguém perceber. Gravar as saídas exatas antes de mudar o código e exigir que voltem idênticas transformou "acho que está igual" em "está igual em 89 de 89". Foi isso que pegou a armadilha da descoberta 19, que nenhum teste unitário com dados falsos teria encontrado.
 9. **Descobrir e medir são problemas diferentes.** O agrupamento automático foi útil para encontrar os temas, mas inadequado para contá-los. Separar as duas tarefas, e usar uma técnica para cada uma, transformou uma tentativa fracassada numa etapa útil do método, e não num beco sem saída.
 10. **Uma mudança local deve ficar local.** A contagem real só precisava valer para as perguntas de frequência, mas a primeira versão alterou as regras gerais do prompt, que valem para todas. A avaliação mostrou o efeito colateral numa pergunta que nada tinha a ver com frequência. Restringir a exceção ao lugar onde ela é necessária, e conferir com a linha de base que todo o resto ficou idêntico, eliminou o efeito.
+11. **A linha de base vigia também a infraestrutura.** A reindexação não mudou nenhuma linha da busca nem nenhum vetor, e mesmo assim a linha de base acusou diferenças. Sem ela, a troca da data teria passado como uma mudança só de metadados, e o corte de recusa continuaria apoiado numa medida que variava a cada reconstrução do índice. Comparar com a busca exata separou o que era aproximação do que seria erro.
 
 ## Pendências
 
 | Pendência | Origem | Encaminhamento |
 | --- | --- | --- |
+| Armadilha dos Correios respondida em cerca de 1 de 6 repetições | Descoberta 29 | Ajustar a instrução do LLM para recusar quando as avaliações falam do assunto mas não respondem à pergunta, conferindo com a linha de base e a avaliação completa |
 | Temas dos elogios | Etapa 10 | Classificar as avaliações positivas, com uma lista de temas própria |
 | Verificar se cada citação sustenta a afirmação | Avaliação da etapa 5 | Fase 2: avaliação com um segundo modelo (*LLM-as-a-judge*) |
 | Conjunto de perguntas escrito pelo próprio grupo | Descoberta 13 | Fase 2: ampliar com perguntas de usuários reais e acompanhar as recusas na busca |

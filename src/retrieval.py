@@ -6,7 +6,7 @@ também o que a interface precisa para mostrar a seleção (candidatos, corte e 
 
 Etapas de uma busca:
 
-1. **Filtros.** O usuário pode escolher nota, sentimento, status da entrega, categoria e período.
+1. **Filtros.** O usuário pode escolher nota, sentimento, status da entrega, categoria e período da compra.
    Quando ele não escolhe o sentimento, a busca tenta inferi-lo da pergunta ("reclamações" indica
    negativo, "elogios" indica positivo). O embedding acerta o assunto, mas confunde elogio com
    reclamação (README, Achado 1), e o filtro pela nota do cliente corrige isso.
@@ -129,9 +129,9 @@ def build_where(filters: SearchFilters) -> dict | None:
         if values:
             conditions.append(_condition(field_name, tuple(values)))
     if filters.date_from:
-        conditions.append({"review_date_int": {"$gte": int(filters.date_from.strftime("%Y%m%d"))}})
+        conditions.append({"purchase_date_int": {"$gte": int(filters.date_from.strftime("%Y%m%d"))}})
     if filters.date_to:
-        conditions.append({"review_date_int": {"$lte": int(filters.date_to.strftime("%Y%m%d"))}})
+        conditions.append({"purchase_date_int": {"$lte": int(filters.date_to.strftime("%Y%m%d"))}})
 
     if not conditions:
         return None

@@ -113,7 +113,7 @@ def describe_filters(filters: SearchFilters) -> str:
     if filters.categories:
         parts.append(f"categorias: {', '.join(filters.categories)}")
     if filters.date_from or filters.date_to:
-        parts.append(f"período: {filters.date_from or 'início'} a {filters.date_to or 'fim'}")
+        parts.append(f"período da compra: {filters.date_from or 'início'} a {filters.date_to or 'fim'}")
     return "; ".join(parts) if parts else "nenhum"
 
 

@@ -2,7 +2,7 @@
 
 Junta a classificação por tema (``data/themes/negative_themes.csv``, gerada por
 ``scripts/classify_themes.py``) com os metadados da base de documentos e conta por tema, categoria,
-período, status da entrega e nota.
+período da compra, status da entrega e nota.
 
 Por que DuckDB: as perguntas de frequência são consultas analíticas (agrupar, contar, cruzar), que o
 SQL expressa diretamente. O DuckDB lê o CSV e o Parquet no próprio processo, sem servidor, e desdobra
@@ -62,6 +62,7 @@ class ThemeAnalytics:
             CREATE VIEW reviews AS
             SELECT d.review_id, d.text, d.review_score, d.product_category, d.delivery_status,
                    CAST(d.review_creation_date AS DATE) AS review_date,
+                   CAST(d.order_purchase_timestamp AS DATE) AS purchase_date,
                    string_split(t.themes, ';') AS themes
             FROM read_csv('{Path(themes_path).as_posix()}', header = true, all_varchar = true) AS t
             JOIN read_parquet('{Path(documents_path).as_posix()}') AS d USING (review_id)
@@ -88,10 +89,10 @@ class ThemeAnalytics:
                 clauses.append(f"{column} IN ({', '.join('?' for _ in values)})")
                 params.extend(values)
         if filters.date_from:
-            clauses.append("review_date >= ?")
+            clauses.append("purchase_date >= ?")
             params.append(filters.date_from)
         if filters.date_to:
-            clauses.append("review_date <= ?")
+            clauses.append("purchase_date <= ?")
             params.append(filters.date_to)
         return (" WHERE " + " AND ".join(clauses)) if clauses else "", params
 
@@ -129,10 +130,10 @@ class ThemeAnalytics:
         return frame
 
     def monthly(self, filters: AnalyticsFilters | None = None) -> pd.DataFrame:
-        """Avaliações por mês e tema, para acompanhar a evolução."""
+        """Avaliações por mês da compra e tema, para acompanhar a evolução."""
         where, params = self._where(filters)
         return self._sql(f"""
-            SELECT date_trunc('month', review_date) AS month, theme, count(*) AS reviews
+            SELECT date_trunc('month', purchase_date) AS month, theme, count(*) AS reviews
             FROM review_themes{where} GROUP BY 1, 2 ORDER BY 1, 3 DESC
         """, params).df()
 
@@ -141,14 +142,14 @@ class ThemeAnalytics:
         where, params = self._where(filters)
         connector = " AND " if where else " WHERE "
         return self._sql(f"""
-            SELECT review_id, text, review_score, product_category, delivery_status, review_date
+            SELECT review_id, text, review_score, product_category, delivery_status, review_date, purchase_date
             FROM review_themes{where}{connector}theme = ? ORDER BY length(text) DESC LIMIT ?
         """, params + [theme, limit]).df()
 
     def monthly_totals(self, filters: AnalyticsFilters | None = None) -> pd.DataFrame:
-        """Avaliações negativas por mês: a base para mostrar cada tema em proporção, e não em volume."""
+        """Avaliações negativas por mês da compra: a base para mostrar cada tema em proporção, e não em volume."""
         where, params = self._where(filters)
         return self._sql(f"""
-            SELECT date_trunc('month', review_date) AS month, count(*) AS total
+            SELECT date_trunc('month', purchase_date) AS month, count(*) AS total
             FROM reviews{where} GROUP BY 1 ORDER BY 1
         """, params).df()

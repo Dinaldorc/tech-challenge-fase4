@@ -61,6 +61,8 @@ def analytics(tmp_path):
         "product_category": ["moveis", "moveis", "moveis", "beleza"],
         "delivery_status": ["atrasado", "no_prazo", "no_prazo", "atrasado"],
         "review_creation_date": pd.to_datetime(["2018-01-10", "2018-02-10", "2018-02-20", "2018-03-05"]),
+        # "d" foi comprada em fevereiro e avaliada em março: o período usa a data da compra.
+        "order_purchase_timestamp": pd.to_datetime(["2018-01-03", "2018-02-03", "2018-02-14", "2018-02-25"]),
     })
     documents.to_parquet(tmp_path / "docs.parquet", index=False)
     pd.DataFrame({
@@ -86,7 +88,7 @@ def test_filters_restrict_the_base(analytics):
     counts = analytics.theme_counts(moveis).set_index("theme")
     assert counts.loc["nao_recebimento", "share"] == pytest.approx(1 / 3)
     period = AnalyticsFilters(date_from=date(2018, 2, 1), date_to=date(2018, 2, 28))
-    assert analytics.total(period) == 2
+    assert analytics.total(period) == 3  # pela data da avaliação seriam 2
 
 
 def test_theme_by_delivery_status(analytics):
