@@ -72,6 +72,11 @@ class ThemeAnalytics:
             SELECT * EXCLUDE (themes), unnest(themes) AS theme FROM reviews
         """)
 
+    def _sql(self, query: str, params: list):
+        """Consulta num cursor próprio: cada cursor é uma conexão independente com o mesmo banco,
+        o que permite atender várias sessões da interface (threads) ao mesmo tempo."""
+        return self.connection.cursor().execute(query, params)
+
     @staticmethod
     def _where(filters: AnalyticsFilters | None) -> tuple[str, list]:
         filters = filters or AnalyticsFilters()
@@ -92,12 +97,12 @@ class ThemeAnalytics:
 
     def total(self, filters: AnalyticsFilters | None = None) -> int:
         where, params = self._where(filters)
-        return self.connection.execute(f"SELECT count(*) FROM reviews{where}", params).fetchone()[0]
+        return self._sql(f"SELECT count(*) FROM reviews{where}", params).fetchone()[0]
 
     def theme_counts(self, filters: AnalyticsFilters | None = None) -> pd.DataFrame:
         """Avaliações por tema, da mais frequente para a menos, com a porcentagem sobre o total filtrado."""
         where, params = self._where(filters)
-        frame = self.connection.execute(f"""
+        frame = self._sql(f"""
             SELECT theme, count(*) AS reviews,
                    count(*) / (SELECT count(*) FROM reviews{where}) AS share
             FROM review_themes{where}
@@ -111,7 +116,7 @@ class ThemeAnalytics:
         if column not in {"product_category", "delivery_status", "review_score"}:
             raise ValueError(f"Coluna não suportada: {column}")
         where, params = self._where(filters)
-        frame = self.connection.execute(f"""
+        frame = self._sql(f"""
             WITH base AS (SELECT {column} AS value, count(*) AS total FROM reviews{where} GROUP BY 1),
                  counts AS (SELECT {column} AS value, theme, count(*) AS reviews FROM review_themes{where} GROUP BY 1, 2)
             SELECT c.value, c.theme, c.reviews, c.reviews / b.total AS share, b.total
@@ -126,7 +131,7 @@ class ThemeAnalytics:
     def monthly(self, filters: AnalyticsFilters | None = None) -> pd.DataFrame:
         """Avaliações por mês e tema, para acompanhar a evolução."""
         where, params = self._where(filters)
-        return self.connection.execute(f"""
+        return self._sql(f"""
             SELECT date_trunc('month', review_date) AS month, theme, count(*) AS reviews
             FROM review_themes{where} GROUP BY 1, 2 ORDER BY 1, 3 DESC
         """, params).df()
@@ -135,7 +140,15 @@ class ThemeAnalytics:
         """Avaliações de um tema, para mostrar como evidência ao lado da contagem."""
         where, params = self._where(filters)
         connector = " AND " if where else " WHERE "
-        return self.connection.execute(f"""
+        return self._sql(f"""
             SELECT review_id, text, review_score, product_category, delivery_status, review_date
             FROM review_themes{where}{connector}theme = ? ORDER BY length(text) DESC LIMIT ?
         """, params + [theme, limit]).df()
+
+    def monthly_totals(self, filters: AnalyticsFilters | None = None) -> pd.DataFrame:
+        """Avaliações negativas por mês: a base para mostrar cada tema em proporção, e não em volume."""
+        where, params = self._where(filters)
+        return self._sql(f"""
+            SELECT date_trunc('month', review_date) AS month, count(*) AS total
+            FROM reviews{where} GROUP BY 1 ORDER BY 1
+        """, params).df()

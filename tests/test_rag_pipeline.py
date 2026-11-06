@@ -5,6 +5,7 @@ from langchain_core.runnables import Runnable, RunnableLambda
 from src.llm import RagAnswer, build_llm
 from src.rag_pipeline import (
     FREQUENCY_NOTE,
+    FREQUENCY_STATS_NOTE,
     PROMPT,
     REFUSAL_MESSAGE,
     SYSTEM_PROMPT,
@@ -12,8 +13,11 @@ from src.rag_pipeline import (
     asks_for_frequency,
     build_user_prompt,
     check_citations,
+    check_numbers,
     format_evidence,
+    is_complaint_scope,
     search_refusal_reason,
+    theme_stats_for,
 )
 from src.retrieval import Evidence, RetrievalResult, SearchFilters
 
@@ -204,3 +208,96 @@ def test_answer_outside_the_structured_format_is_refused():
     response = RagPipeline(StubRetriever(EVIDENCES), FakeLLM(None)).ask("reclamações?")
     assert not response.answered and response.refused_at == "llm"
     assert "formato" in response.refusal_reason
+
+
+# ---- Contagem real nas perguntas de frequência -------------------------------------------------
+
+
+@pytest.fixture()
+def analytics(tmp_path):
+    import pandas as pd
+
+    from src.analytics import ThemeAnalytics
+
+    pd.DataFrame({
+        "review_id": ["a", "b", "c", "d"],
+        "text": ["Atraso na entrega", "Não recebi o produto", "Produto veio quebrado", "Gostei, mas nota 1"],
+        "review_score": [1, 1, 2, 1],
+        "product_category": ["moveis_decoracao"] * 4,
+        "delivery_status": ["atrasado"] * 4,
+        "review_creation_date": pd.to_datetime(["2018-03-05"] * 4),
+    }).to_parquet(tmp_path / "docs.parquet", index=False)
+    pd.DataFrame({
+        "review_id": ["a", "b", "c", "d"],
+        "themes": ["atraso", "nao_recebimento;atraso", "defeito_qualidade", "sem_reclamacao"],
+    }).to_csv(tmp_path / "themes.csv", index=False)
+    return ThemeAnalytics(tmp_path / "themes.csv", tmp_path / "docs.parquet")
+
+
+class FakeVectorStore:
+    def get(self, ids, include):
+        texts = {e.review_id: e for e in EVIDENCES}
+        found = [i for i in ids if i in texts]
+        return {"ids": found, "documents": [texts[i].text for i in found], "metadatas": [texts[i].metadata for i in found]}
+
+
+def test_complaint_scope():
+    assert is_complaint_scope(SearchFilters(sentiments=("negativo",)))
+    assert is_complaint_scope(SearchFilters(review_scores=(1, 2)))
+    assert not is_complaint_scope(SearchFilters(sentiments=("positivo",)))
+    assert not is_complaint_scope(SearchFilters(sentiments=("negativo", "positivo")))
+    assert not is_complaint_scope(SearchFilters())
+
+
+def test_theme_stats_use_the_search_filters_and_skip_non_complaints(analytics):
+    stats = theme_stats_for(analytics, SearchFilters(sentiments=("negativo",), categories=("moveis_decoracao",)))
+    assert stats.total == 4
+    assert [label for _, label, *_ in stats.counts][0] == "Atraso na entrega"
+    assert "sem_reclamacao" not in [theme for theme, *_ in stats.counts]
+    text = stats.as_text()
+    assert "Contagem real (4 avaliações negativas classificadas" in text
+    assert "- Atraso na entrega: 2 avaliações (50,0%)" in text
+    assert theme_stats_for(analytics, SearchFilters(sentiments=("positivo",))) is None
+    assert theme_stats_for(analytics, SearchFilters(sentiments=("negativo",), categories=("outra",))) is None
+
+
+def test_check_numbers_flags_percentages_outside_the_count(analytics):
+    stats = theme_stats_for(analytics, SearchFilters(sentiments=("negativo",)))
+    assert check_numbers("Atraso em 50,0% e não recebimento em 25,0%.", stats) == ()
+    assert check_numbers("Atraso em 50.0% das avaliações.", stats) == ()  # ponto decimal também é aceito
+    assert check_numbers("Atraso em 60% dos casos e 50,0% em outro.", stats) == ("60%",)
+    assert check_numbers("Metade dos clientes, 50%.", None) == ("50%",)
+
+
+def test_frequency_question_receives_the_real_count(analytics):
+    llm = FakeLLM(answer("Atraso em 50,0% [1].", [1]))
+    response = RagPipeline(StubRetriever(EVIDENCES), llm, analytics).ask(
+        "Quais reclamações aparecem com maior frequência?")
+    assert response.answered and response.theme_stats is not None
+    user = llm.prompts[0][1]
+    assert FREQUENCY_STATS_NOTE in user and "Contagem real (4 avaliações" in user
+    assert FREQUENCY_NOTE not in user
+    assert response.invalid_numbers == ()
+
+
+def test_regular_question_and_praise_frequency_keep_the_previous_prompt(analytics):
+    llm = FakeLLM(answer("Atraso [1].", [1]))
+    RagPipeline(StubRetriever(EVIDENCES), llm, analytics).ask("Quais as reclamações sobre entrega?")
+    assert "Contagem real" not in llm.prompts[0][1]
+    praise = StubRetriever(EVIDENCES, filters=SearchFilters(sentiments=("positivo",)))
+    llm = FakeLLM(answer("Elogios [1].", [1]))
+    response = RagPipeline(praise, llm, analytics).ask("Quais elogios aparecem com maior frequência?")
+    assert FREQUENCY_NOTE in llm.prompts[0][1] and response.theme_stats is None
+
+
+def test_without_evidence_a_frequency_question_uses_theme_examples(analytics):
+    retriever = StubRetriever([])
+    retriever.vector_store = FakeVectorStore()
+    # As avaliações do índice falso têm os mesmos ids da classificação: a, b e c.
+    llm = FakeLLM(answer("Atraso em 50,0% [1].", [1]))
+    response = RagPipeline(retriever, llm, analytics).ask("Quais os problemas mais comuns?")
+    assert response.answered and response.refused_at is None
+    assert all(e.metadata.get("theme_example") for e in response.retrieval.evidences)
+    regular = RagPipeline(StubRetriever([]), FakeLLM(answer("x [1]", [1])), analytics).ask("Quais os problemas?")
+    assert regular.refused_at == "busca"  # sem pedido de frequência, a recusa na busca continua
+

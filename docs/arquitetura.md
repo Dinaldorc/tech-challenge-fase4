@@ -75,7 +75,11 @@ flowchart LR
     B --> C[("data/themes/<br/>negative_themes.csv<br/>versionado")]
     C --> D["src/analytics.py<br/>DuckDB: contagens por tema,<br/>categoria, período, entrega e nota"]
     E["data/processed/<br/>reviews_docs.parquet"] --> D
+    D --> F["app.py: visão Panorama"]
+    D --> G["src/rag_pipeline.py: contagem real<br/>nas perguntas de frequência"]
 ```
+
+Nas perguntas de frequência sobre reclamações, a cadeia do fluxo 2 consulta essas contagens com os mesmos filtros da busca e as inclui no contexto enviado ao LLM, que é instruído a copiá-las exatamente; o código confere cada porcentagem da resposta. Sem evidência acima do corte, essas perguntas usam exemplos dos temas mais frequentes, em vez de serem recusadas.
 
 Os temas foram descobertos antes por agrupamento automático (`scripts/compare_clustering.py`), que se mostrou inadequado para contar (README, "Frequência por tema").
 
@@ -91,7 +95,7 @@ Os temas foram descobertos antes por agrupamento automático (`scripts/compare_c
 | [src/themes.py](../src/themes.py) | Lista de temas das reclamações, com definições, e a cadeia que classifica avaliações em lotes com saída estruturada |
 | [src/analytics.py](../src/analytics.py) | Contagens por tema, categoria, período, status da entrega e nota, em SQL com DuckDB |
 | [src/rag_pipeline.py](../src/rag_pipeline.py) | O `ChatPromptTemplate` e a cadeia LCEL com as três barreiras: busca, `RunnableBranch` da recusa, prompt, LLM e conferência das citações |
-| [app.py](../app.py) | Interface em Streamlit, com a resposta, as evidências e as etapas do pipeline |
+| [app.py](../app.py) | Interface em Streamlit, com duas visões: Perguntar (resposta, evidências e etapas do pipeline) e Panorama (frequência dos temas das reclamações) |
 
 | Script | Uso |
 | --- | --- |

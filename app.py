@@ -5,9 +5,13 @@ Execução:
 
 Requer o índice (python scripts/build_index.py) e OPENAI_API_KEY no .env.
 
-Além da resposta e das avaliações citadas, a tela mostra cada etapa do pipeline (filtros, avaliações
-recuperadas com a similaridade e o corte, contexto enviado ao LLM e decisão final), para que a
-origem de cada resposta possa ser conferida.
+Duas visões:
+
+- **Perguntar:** a resposta, as avaliações citadas e cada etapa do pipeline (filtros, avaliações
+  recuperadas com a similaridade e o corte, contexto enviado ao LLM e decisão final), para que a
+  origem de cada resposta possa ser conferida.
+- **Panorama:** a frequência de cada tema nas avaliações negativas (classificação de
+  ``data/themes/negative_themes.csv``), por categoria, status da entrega e período.
 """
 
 from __future__ import annotations
@@ -16,11 +20,20 @@ from collections import Counter
 from datetime import date
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
+from src.analytics import DEFAULT_DOCUMENTS, DEFAULT_THEMES, THEME_LABELS, AnalyticsFilters, ThemeAnalytics
 from src.llm import build_llm
-from src.rag_pipeline import SYSTEM_PROMPT, RagPipeline, RagResponse, asks_for_frequency, describe_filters
+from src.rag_pipeline import (
+    SYSTEM_PROMPT,
+    RagPipeline,
+    RagResponse,
+    asks_for_frequency,
+    describe_filters,
+    format_int,
+)
 from src.retrieval import DEFAULT_K, Evidence, SearchFilters, load_retriever
 from src.vector_store import count_documents
 
@@ -52,15 +65,30 @@ REFUSAL_STAGE = {
     "citacao": "na conferência das citações: a resposta não citou nenhuma avaliação existente",
 }
 
+# Cores dos gráficos: um único tom (as barras e a linha mostram uma série só) e uma escala sequencial
+# do mesmo tom para o mapa de calor, do claro (pouco) ao escuro (muito).
+CHART_COLOR = "#2a78d6"
+SEQUENTIAL_RANGE = ["#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"]
+MIN_MONTH_REVIEWS = 50  # meses com menos reclamações que isso oscilam demais em porcentagem
+MIN_STATUS_REVIEWS = 30
+
 st.set_page_config(page_title="Voz do Cliente Olist", page_icon="💬", layout="wide")
 
 
 # ---- Recursos carregados uma única vez ---------------------------------------------------------
 
 
+@st.cache_resource(show_spinner="Carregando a classificação por tema...")
+def load_analytics() -> ThemeAnalytics | None:
+    """Contagens por tema; ``None`` se a base de documentos ainda não foi gerada (prepare_data.py)."""
+    if not (DEFAULT_THEMES.exists() and DEFAULT_DOCUMENTS.exists()):
+        return None
+    return ThemeAnalytics()
+
+
 @st.cache_resource(show_spinner="Carregando o modelo de embeddings e o índice...")
 def load_pipeline() -> RagPipeline:
-    return RagPipeline(load_retriever(INDEX_DIR), build_llm())
+    return RagPipeline(load_retriever(INDEX_DIR), build_llm(), load_analytics())
 
 
 @st.cache_data(show_spinner=False)
@@ -142,7 +170,29 @@ def evidence_card(number: int, evidence: Evidence) -> None:
         st.markdown(f"**[{number}]** {stars} · {label(meta['product_category'])} · entrega: {delivery} · "
                     f"{meta['review_date']}{repeated}")
         st.markdown(f"> {evidence.text}")
-        st.caption(f"similaridade {num(evidence.similarity)} · review_id `{evidence.review_id}`")
+        if meta.get("theme_example"):
+            origin = f"exemplo do tema \"{meta['theme_example']}\", escolhido pela classificação, e não pela similaridade"
+        else:
+            origin = f"similaridade {num(evidence.similarity)}"
+        st.caption(f"{origin} · review_id `{evidence.review_id}`")
+
+
+def show_frequency_note(response: RagResponse) -> None:
+    if not (response.answered and asks_for_frequency(response.question)):
+        return
+    if response.theme_stats:
+        st.info(
+            f"Os números vêm da classificação por tema das {format_int(response.theme_stats.total)} avaliações "
+            "negativas que atendem aos filtros, e não das avaliações citadas, que são exemplos. O detalhamento "
+            "está na visão Panorama.",
+            title="Pergunta de frequência: contagem real",
+        )
+    else:
+        st.warning(
+            "A contagem por tema existe só para as reclamações. Para esta pergunta, a busca traz os comentários "
+            "mais parecidos, e não uma amostra representativa: a resposta mostra exemplos, e não um ranking.",
+            title="Pergunta de frequência sem contagem",
+        )
 
 
 def show_answer(response: RagResponse) -> None:
@@ -150,6 +200,8 @@ def show_answer(response: RagResponse) -> None:
         st.markdown(response.answer)
         if response.invalid_citations:
             st.warning(f"A resposta citou números sem avaliação correspondente: {list(response.invalid_citations)}")
+        if response.invalid_numbers:
+            st.warning(f"A resposta traz porcentagens que não estão na contagem: {', '.join(response.invalid_numbers)}")
         st.subheader(f"Evidências usadas na resposta ({len(response.citations)})")
         st.caption(
             "Este número depende do limite de evidências da barra lateral, e não de quantos clientes "
@@ -206,8 +258,17 @@ def show_pipeline(response: RagResponse, chosen: SearchFilters) -> None:
                              "nota": evidence.metadata["review_score"], "repetições": evidence.mentions,
                              "categoria": label(evidence.metadata["product_category"]), "texto": evidence.text})
             if rows:
-                st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+                st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", alt="Candidatos da busca")
                 st.caption("Comentários iguais depois da normalização aparecem uma vez, com o número de repetições.")
+            if retrieval.evidences and retrieval.evidences[0].metadata.get("theme_example"):
+                st.info(
+                    "Nenhuma avaliação passou do corte de similaridade. Como a pergunta pede a frequência de "
+                    "reclamações, foram usados como evidência exemplos dos temas mais frequentes, escolhidos "
+                    "pela classificação por tema."
+                )
+            if response.theme_stats:
+                st.markdown("**Contagem real enviada ao LLM**")
+                st.code(response.theme_stats.as_text(), language=None, wrap_lines=True)
 
         with steps[2]:
             if response.user_prompt:
@@ -233,23 +294,152 @@ def show_pipeline(response: RagResponse, chosen: SearchFilters) -> None:
 # ---- Página ------------------------------------------------------------------------------------
 
 
-def main() -> None:
-    st.title("💬 Voz do Cliente Olist")
-    st.caption(
-        "Pergunte em linguagem natural sobre as avaliações dos clientes. As respostas se baseiam apenas nas "
-        "avaliações encontradas, citam cada uma delas e são recusadas quando não há evidência."
+# ---- Panorama ----------------------------------------------------------------------------------
+
+
+@st.cache_data(show_spinner=False, max_entries=64)
+def panorama_data(filters: AnalyticsFilters) -> dict:
+    analytics = load_analytics()
+    return {
+        "total": analytics.total(filters),
+        "counts": analytics.theme_counts(filters),
+        "by_status": analytics.theme_by("delivery_status", filters),
+        "monthly": analytics.monthly(filters),
+        "monthly_totals": analytics.monthly_totals(filters),
+    }
+
+
+def ranking_chart(counts: pd.DataFrame) -> alt.Chart:
+    data = counts.assign(percent=counts["share"] * 100,
+                         text=counts["share"].map(lambda v: f"{v * 100:.1f}%".replace(".", ",")))
+    order = data["label"].tolist()
+    base = alt.Chart(data).encode(
+        y=alt.Y("label:N", sort=order, title=None, axis=alt.Axis(labelLimit=320)),
+        x=alt.X("percent:Q", title="% das avaliações negativas", axis=alt.Axis(grid=False)),
+        tooltip=[alt.Tooltip("label:N", title="Tema"), alt.Tooltip("reviews:Q", title="Avaliações", format=",d"),
+                 alt.Tooltip("text:N", title="% das negativas")],
     )
+    bars = base.mark_bar(color=CHART_COLOR, cornerRadiusEnd=4, height=18)
+    labels = base.mark_text(align="left", dx=4, color="#52514e").encode(text="text:N")
+    return (bars + labels).properties(height=34 * len(data))
 
-    if not INDEX_DIR.exists():
-        st.error("Índice não encontrado. Rode `python scripts/build_index.py` antes de abrir a interface.")
-        st.stop()
-    try:
-        pipeline = load_pipeline()
-    except RuntimeError as error:
-        st.error(str(error))
-        st.stop()
 
-    options = load_filter_options()
+def status_heatmap(by_status: pd.DataFrame, theme_order: list[str]) -> alt.Chart:
+    totals = by_status.drop_duplicates("value").set_index("value")["total"]
+    statuses = totals[totals >= MIN_STATUS_REVIEWS].sort_values(ascending=False).index.tolist()
+    themes = [theme for theme, name in THEME_LABELS.items() if name in theme_order]
+    # Todas as combinações tema × status, com 0 onde não há avaliação (em vez de uma célula vazia).
+    grid = pd.MultiIndex.from_product([statuses, themes], names=["value", "theme"]).to_frame(index=False)
+    data = grid.merge(by_status[["value", "theme", "reviews"]], on=["value", "theme"], how="left").fillna({"reviews": 0})
+    data["total"] = data["value"].map(totals)
+    data["percent"] = data["reviews"] / data["total"] * 100
+    # O "|" vira quebra de linha no rótulo do eixo, para os nomes longos não se sobreporem.
+    data["status"] = data["value"].map(lambda v: DELIVERY_LABELS.get(v, v).replace(", ", ",|").replace(" ou ", " ou|"))
+    data["label"] = data["theme"].map(THEME_LABELS)
+    data["text"] = data["percent"].map(lambda v: f"{v:.0f}%")
+    status_order = [DELIVERY_LABELS.get(v, v).replace(", ", ",|").replace(" ou ", " ou|") for v in statuses]
+    base = alt.Chart(data).encode(
+        x=alt.X("status:N", sort=status_order, title="Status da entrega no pedido",
+                axis=alt.Axis(labelAngle=0, labelExpr="split(datum.label, '|')", labelLimit=160)),
+        y=alt.Y("label:N", sort=theme_order, title=None, axis=alt.Axis(labelLimit=320)),
+        tooltip=[alt.Tooltip("label:N", title="Tema"), alt.Tooltip("status:N", title="Entrega"),
+                 alt.Tooltip("reviews:Q", title="Avaliações"), alt.Tooltip("total:Q", title="Negativas com esse status"),
+                 alt.Tooltip("text:N", title="% das negativas com esse status")],
+    )
+    cells = base.mark_rect(stroke="#fcfcfb", strokeWidth=2).encode(
+        color=alt.Color("percent:Q", title="%", scale=alt.Scale(range=SEQUENTIAL_RANGE, domain=[0, 70], clamp=True))
+    )
+    text = base.mark_text(fontSize=11).encode(
+        text="text:N", color=alt.condition("datum.percent > 35", alt.value("#ffffff"), alt.value("#0b0b0b"))
+    )
+    return (cells + text).properties(height=30 * len(theme_order))
+
+
+def trend_chart(monthly: pd.DataFrame, totals: pd.DataFrame, theme: str) -> tuple[alt.Chart, int]:
+    data = totals.merge(monthly[monthly["theme"] == theme], on="month", how="left").fillna({"reviews": 0})
+    shown = data[data["total"] >= MIN_MONTH_REVIEWS].copy()
+    shown["percent"] = shown["reviews"] / shown["total"] * 100
+    shown["text"] = shown["percent"].map(lambda v: f"{v:.1f}%".replace(".", ","))
+    chart = alt.Chart(shown).mark_line(color=CHART_COLOR, strokeWidth=2, point=alt.OverlayMarkDef(size=60, color=CHART_COLOR)).encode(
+        x=alt.X("month:T", title=None, axis=alt.Axis(format="%m/%Y", grid=False, tickCount=7, labelOverlap=True)),
+        y=alt.Y("percent:Q", title=f"% das negativas do mês"),
+        tooltip=[alt.Tooltip("month:T", title="Mês", format="%m/%Y"), alt.Tooltip("text:N", title="% das negativas"),
+                 alt.Tooltip("reviews:Q", title="Avaliações do tema"), alt.Tooltip("total:Q", title="Negativas no mês")],
+    ).properties(height=280)
+    return chart, len(data) - len(shown)
+
+
+def show_panorama(options: dict) -> None:
+    if load_analytics() is None:
+        st.info("A base de documentos não foi encontrada. Rode `python scripts/prepare_data.py` para ver o Panorama.")
+        return
+    st.caption(
+        "Frequência de cada tema nas avaliações negativas (notas 1 e 2) com texto. Cada avaliação foi classificada "
+        "pelo LLM numa lista fechada de temas e pode ter mais de um; por isso as porcentagens somam mais de 100%. "
+        "A classificação foi validada contra uma referência independente e contra o status do pedido (README, "
+        "\"Frequência por tema\")."
+    )
+    with st.container(horizontal=True, vertical_alignment="bottom"):
+        categories = st.multiselect("Categoria do produto", options["categories"], format_func=label, key="pan_cat")
+        statuses = st.multiselect("Status da entrega", options["delivery"], key="pan_status",
+                                  format_func=lambda v: DELIVERY_LABELS.get(v, v))
+        scores = st.pills("Nota", [1, 2], selection_mode="multi", key="pan_scores")
+        period = st.date_input("Período da avaliação", (options["date_min"], options["date_max"]), key="pan_period",
+                               min_value=options["date_min"], max_value=options["date_max"], format="DD/MM/YYYY")
+    date_from, date_to = period if isinstance(period, tuple) and len(period) == 2 else (None, None)
+    filters = AnalyticsFilters(tuple(categories) or None, tuple(statuses) or None, tuple(scores) or None, date_from, date_to)
+    data = panorama_data(filters)
+    if data["total"] == 0:
+        st.info("Nenhuma avaliação negativa com esses filtros.")
+        return
+
+    counts = data["counts"]
+    complaints = counts[counts["theme"] != "sem_reclamacao"]
+    top = complaints.iloc[0]
+    with st.container(horizontal=True):
+        st.metric("Avaliações negativas", format_int(data["total"]), border=True)
+        st.metric("Tema mais frequente", top.label, border=True)
+        st.metric("Proporção do tema mais frequente", f"{top.share * 100:.1f}%".replace(".", ","), border=True)
+
+    with st.container(border=True):
+        st.subheader("Temas das reclamações")
+        st.altair_chart(ranking_chart(complaints), width="stretch",
+                        alt="Ranking dos temas pela porcentagem das avaliações negativas")
+        without = counts.loc[counts["theme"] == "sem_reclamacao", "reviews"].sum()
+        if without:
+            st.caption(f"Fora do ranking: {without} avaliações negativas cujo texto não traz reclamação "
+                       "(por exemplo, elogios dados com nota baixa).")
+
+    left, right = st.columns(2)
+    with left, st.container(border=True, height="stretch"):
+        st.subheader("Tema × status da entrega")
+        st.altair_chart(status_heatmap(data["by_status"], complaints["label"].tolist()), width="stretch",
+                        alt="Porcentagem de cada tema por status da entrega do pedido")
+        st.caption("Cada coluna soma mais de 100%, porque uma avaliação pode ter mais de um tema. "
+                   f"Status com menos de {MIN_STATUS_REVIEWS} avaliações ficam de fora.")
+    with right, st.container(border=True, height="stretch"):
+        st.subheader("Evolução de um tema")
+        theme = st.selectbox("Tema", complaints["theme"].tolist(), format_func=THEME_LABELS.get, key="pan_theme")
+        chart, hidden = trend_chart(data["monthly"], data["monthly_totals"], theme)
+        st.altair_chart(chart, width="stretch", alt=f"Evolução mensal do tema {THEME_LABELS[theme]}")
+        if hidden:
+            st.caption(f"{hidden} meses com menos de {MIN_MONTH_REVIEWS} avaliações negativas ficam de fora, "
+                       "porque a porcentagem oscila demais com poucas avaliações.")
+
+    with st.container(border=True):
+        st.subheader(f"Exemplos: {THEME_LABELS[theme]}")
+        examples = load_analytics().examples(theme, filters, limit=4)
+        for row in examples.itertuples():
+            stars = "★" * int(row.review_score) + "☆" * (5 - int(row.review_score))
+            st.markdown(f"{stars} · {label(row.product_category)} · entrega: "
+                        f"{DELIVERY_LABELS.get(row.delivery_status, row.delivery_status)} · {row.review_date:%d/%m/%Y}")
+            st.markdown(f"> {row.text}")
+
+
+# ---- Página ------------------------------------------------------------------------------------
+
+
+def show_ask(pipeline: RagPipeline, options: dict) -> None:
     filters, k = sidebar_filters(options)
 
     st.markdown("**Exemplos:**")
@@ -272,16 +462,35 @@ def main() -> None:
     response: RagResponse | None = st.session_state.get("response")
     if response is None:
         return
-    if response.answered and asks_for_frequency(response.question):
-        st.warning(
-            "Esta pergunta pede frequência ou proporção. A busca traz os comentários mais parecidos com a "
-            "pergunta, e não uma amostra representativa: a resposta mostra exemplos, não um ranking. "
-            "Exemplo: a busca encontra \"ao menos 98\" cópias de \"não recebi o produto\", mas a base tem "
-            "2.127 avaliações que falam em não recebimento, 19,6% das negativas. Esse tipo de número exige "
-            "contar sobre a base inteira."
-        )
+    show_frequency_note(response)
     show_answer(response)
     show_pipeline(response, st.session_state.get("chosen_filters", SearchFilters()))
 
+
+def main() -> None:
+    st.title("💬 Voz do Cliente Olist")
+    st.caption(
+        "Pergunte em linguagem natural sobre as avaliações dos clientes, ou veja a frequência de cada tema. "
+        "As respostas se baseiam apenas nas avaliações encontradas, citam cada uma delas e são recusadas "
+        "quando não há evidência."
+    )
+
+    if not INDEX_DIR.exists():
+        st.error("Índice não encontrado. Rode `python scripts/build_index.py` antes de abrir a interface.")
+        st.stop()
+    try:
+        pipeline = load_pipeline()
+    except RuntimeError as error:
+        st.error(str(error))
+        st.stop()
+
+    options = load_filter_options()
+    view = st.segmented_control("Visão", [":material/chat: Perguntar", ":material/bar_chart: Panorama"],
+                                default=":material/chat: Perguntar", required=True, key="view",
+                                label_visibility="collapsed")
+    if view.endswith("Panorama"):
+        show_panorama(options)
+    else:
+        show_ask(pipeline, options)
 
 main()

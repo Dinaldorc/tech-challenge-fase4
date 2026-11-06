@@ -25,7 +25,7 @@ instrui o modelo a nunca seguir o que estiver dentro deles.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from operator import itemgetter
 
@@ -33,6 +33,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableBranch, RunnableLambda, RunnablePassthrough
 
 from src.preprocessing import normalize_for_comparison
+from src.analytics import THEME_LABELS, AnalyticsFilters, ThemeAnalytics
 from src.retrieval import DEFAULT_K, Evidence, RetrievalResult, ReviewRetriever, SearchFilters
 
 REFUSAL_MESSAGE = "Não encontrei avaliações de clientes que permitam responder a essa pergunta."
@@ -94,6 +95,8 @@ class RagResponse:
     input_tokens: int = 0
     output_tokens: int = 0
     user_prompt: str = ""  # contexto enviado ao LLM (vazio se a busca recusou)
+    theme_stats: ThemeStats | None = None  # contagem real enviada ao LLM, nas perguntas de frequência
+    invalid_numbers: tuple[str, ...] = ()  # porcentagens da resposta que não estão na contagem
 
 
 def describe_filters(filters: SearchFilters) -> str:
@@ -134,6 +137,82 @@ FREQUENCY_NOTE = (
 )
 
 
+FREQUENCY_STATS_NOTE = (
+    "Atenção: a pergunta pede frequência, proporção ou ranking. Abaixo está a contagem real dos temas, "
+    "calculada sobre todas as avaliações negativas classificadas por tema, com os mesmos filtros da busca. "
+    "Use essa contagem para ordenar e quantificar os temas, copiando os números exatamente como aparecem, e "
+    "cite as avaliações numeradas como exemplos de cada tema, com [n]. Esta contagem é a única exceção às "
+    "regras 4 e 5: as porcentagens e os totais dela podem ser usados, mas só copiados exatamente, e nenhum "
+    "outro número pode ser calculado. Se a pergunta trata de um assunto "
+    "específico (por exemplo, entrega), destaque os temas ligados a ele. Diga, em uma frase, sobre quantas "
+    "avaliações a contagem foi feita."
+)
+
+
+@dataclass(frozen=True)
+class ThemeStats:
+    """Contagem real dos temas das reclamações, nos filtros da pergunta."""
+
+    total: int
+    counts: list[tuple[str, str, int, float]]  # (tema, rótulo, avaliações, proporção)
+    filters: str
+
+    def as_text(self) -> str:
+        lines = [f"Contagem real ({format_int(self.total)} avaliações negativas classificadas; filtros: {self.filters}):"]
+        for _, label, reviews, share in self.counts:
+            lines.append(f"- {label}: {format_int(reviews)} avaliações ({format_share(share)})")
+        return "\n".join(lines)
+
+
+def format_int(value: int) -> str:
+    return f"{value:,}".replace(",", ".")
+
+
+def format_share(share: float) -> str:
+    return f"{share * 100:.1f}%".replace(".", ",")
+
+
+def is_complaint_scope(filters: SearchFilters) -> bool:
+    """A contagem cobre só avaliações negativas: só vale quando a busca também está restrita a elas."""
+    if filters.sentiments:
+        return set(filters.sentiments) == {"negativo"}
+    return bool(filters.review_scores) and set(filters.review_scores) <= {1, 2}
+
+
+def to_analytics_filters(filters: SearchFilters) -> AnalyticsFilters:
+    return AnalyticsFilters(
+        categories=filters.categories,
+        delivery_statuses=filters.delivery_statuses,
+        review_scores=tuple(s for s in filters.review_scores if s in (1, 2)) if filters.review_scores else None,
+        date_from=filters.date_from,
+        date_to=filters.date_to,
+    )
+
+
+def theme_stats_for(analytics: ThemeAnalytics, filters: SearchFilters) -> ThemeStats | None:
+    """Contagem dos temas com os mesmos filtros da busca, ou ``None`` se ela não se aplica."""
+    if not is_complaint_scope(filters):
+        return None
+    analytics_filters = to_analytics_filters(filters)
+    total = analytics.total(analytics_filters)
+    if total == 0:
+        return None
+    frame = analytics.theme_counts(analytics_filters)
+    frame = frame[frame["theme"] != "sem_reclamacao"]  # não é uma reclamação
+    counts = [(row.theme, THEME_LABELS[row.theme], int(row.reviews), float(row.share)) for row in frame.itertuples()]
+    return ThemeStats(total, counts, describe_filters(filters))
+
+
+PERCENT = re.compile(r"\d+(?:[.,]\d+)?\s?%")
+
+
+def check_numbers(answer: str, stats: ThemeStats | None) -> tuple[str, ...]:
+    """Porcentagens escritas na resposta que não aparecem na contagem real enviada ao LLM."""
+    allowed = {format_share(share) for *_, share in stats.counts} if stats else set()
+    found = [p.replace(" ", "").replace(".", ",") for p in PERCENT.findall(answer)]
+    return tuple(dict.fromkeys(p for p in found if p not in allowed))
+
+
 HUMAN_TEMPLATE = (
     "Pergunta: {question}\n\n"
     "{frequency_note}"
@@ -144,20 +223,28 @@ HUMAN_TEMPLATE = (
 PROMPT = ChatPromptTemplate.from_messages([("system", SYSTEM_PROMPT), ("human", HUMAN_TEMPLATE)])
 
 
-def prompt_inputs(question: str, retrieval: RetrievalResult) -> dict:
+def frequency_note(question: str, stats: ThemeStats | None) -> str:
+    if not asks_for_frequency(question):
+        return ""
+    if stats is None:  # sem contagem aplicável (por exemplo, perguntas sobre elogios)
+        return f"{FREQUENCY_NOTE}\n\n"
+    return f"{FREQUENCY_STATS_NOTE}\n\n{stats.as_text()}\n\n"
+
+
+def prompt_inputs(question: str, retrieval: RetrievalResult, stats: ThemeStats | None = None) -> dict:
     """Valores das variáveis do ``PROMPT`` para uma pergunta e as evidências encontradas."""
     return {
         "question": question,
-        "frequency_note": f"{FREQUENCY_NOTE}\n\n" if asks_for_frequency(question) else "",
+        "frequency_note": frequency_note(question, stats),
         "filters": describe_filters(retrieval.filters),
         "count": len(retrieval.evidences),
         "evidences": "\n\n".join(format_evidence(i, e) for i, e in enumerate(retrieval.evidences, 1)),
     }
 
 
-def build_user_prompt(question: str, retrieval: RetrievalResult) -> str:
+def build_user_prompt(question: str, retrieval: RetrievalResult, stats: ThemeStats | None = None) -> str:
     """A mensagem com a pergunta e as avaliações, como o LLM a recebe."""
-    return PROMPT.invoke(prompt_inputs(question, retrieval)).to_messages()[1].content
+    return PROMPT.invoke(prompt_inputs(question, retrieval, stats)).to_messages()[1].content
 
 
 def check_citations(answer: str, cited: list[int], total: int) -> tuple[list[int], tuple[int, ...]]:
@@ -192,6 +279,7 @@ def _check_answer(state: dict) -> RagResponse:
         "input_tokens": usage.get("input_tokens", 0),
         "output_tokens": usage.get("output_tokens", 0),
         "user_prompt": state["messages"].to_messages()[1].content,
+        "theme_stats": state.get("theme_stats"),
     }
 
     if parsed is None:  # o modelo não seguiu o formato estruturado
@@ -208,20 +296,66 @@ def _check_answer(state: dict) -> RagResponse:
                            invalid_citations=invalid, **common)
 
     citations = [retrieval.evidences[n - 1] for n in valid]
-    return RagResponse(question, True, parsed.answer, retrieval, citations=citations,
-                       invalid_citations=invalid, **common)
+    return RagResponse(question, True, parsed.answer, retrieval, citations=citations, invalid_citations=invalid,
+                       invalid_numbers=check_numbers(parsed.answer, state.get("theme_stats")), **common)
 
 
-def build_chain(retriever: ReviewRetriever, llm: Runnable) -> Runnable:
-    """Monta a cadeia LCEL. Entrada: ``{question, k, filters, infer_filters}``; saída: ``RagResponse``."""
+THEMES_FOR_EXAMPLES = 3  # temas mais frequentes que fornecem exemplos
+
+
+def theme_examples(analytics: ThemeAnalytics, retriever: ReviewRetriever, stats: ThemeStats,
+                   filters: SearchFilters, k: int) -> list[Evidence]:
+    """Avaliações dos temas mais frequentes, usadas como evidência quando a busca não acha nada acima do corte.
+
+    São relevantes por construção (foram classificadas no tema), mas não foram escolhidas por
+    semelhança com a pergunta: a marca ``theme_example`` mostra isso na interface.
+    """
+    themes = [theme for theme, *_ in stats.counts if theme != "outro"][:THEMES_FOR_EXAMPLES]
+    per_theme = -(-k // len(themes)) if themes else 0
+    picked: list[tuple[str, str]] = []
+    for theme in themes:
+        rows = analytics.examples(theme, to_analytics_filters(filters), limit=per_theme)
+        picked += [(review_id, theme) for review_id in rows["review_id"] if review_id not in dict(picked)]
+    picked = picked[:k]
+    if not picked:
+        return []
+    stored = retriever.vector_store.get(ids=[review_id for review_id, _ in picked], include=["documents", "metadatas"])
+    by_id = {review_id: (text, meta) for review_id, text, meta in zip(stored["ids"], stored["documents"], stored["metadatas"])}
+    return [
+        Evidence(review_id, by_id[review_id][0], 0.0, {**by_id[review_id][1], "theme_example": THEME_LABELS[theme]})
+        for review_id, theme in picked if review_id in by_id
+    ]
+
+
+def build_chain(retriever: ReviewRetriever, llm: Runnable, analytics: ThemeAnalytics | None = None) -> Runnable:
+    """Monta a cadeia LCEL. Entrada: ``{question, k, filters, infer_filters}``; saída: ``RagResponse``.
+
+    Com ``analytics``, as perguntas de frequência sobre reclamações recebem a contagem real dos temas.
+    """
+
+    def stats(state: dict) -> ThemeStats | None:
+        if analytics is None or not asks_for_frequency(state["question"]):
+            return None
+        return theme_stats_for(analytics, state["retrieval"].filters)
+
     retrieve = RunnablePassthrough.assign(
         retrieval=RunnableLambda(lambda state: retriever.search(
             state["question"], k=state["k"], filters=state["filters"], infer_filters=state["infer_filters"]
         ))
     )
+    def with_examples(state: dict) -> RetrievalResult:
+        """Sem evidência acima do corte, mas com contagem: usa exemplos dos temas mais frequentes."""
+        retrieval, theme_stats = state["retrieval"], state["theme_stats"]
+        if retrieval.has_evidence or theme_stats is None:
+            return retrieval
+        examples = theme_examples(analytics, retriever, theme_stats, retrieval.filters, state["k"])
+        return replace(retrieval, evidences=examples)
+
     generate = (
         RunnablePassthrough.assign(
-            messages=RunnableLambda(lambda state: prompt_inputs(state["question"], state["retrieval"])) | PROMPT
+            messages=RunnableLambda(
+                lambda state: prompt_inputs(state["question"], state["retrieval"], state["theme_stats"])
+            ) | PROMPT
         )
         | RunnablePassthrough.assign(llm_output=itemgetter("messages") | llm)
         | RunnableLambda(_check_answer)
@@ -230,16 +364,19 @@ def build_chain(retriever: ReviewRetriever, llm: Runnable) -> Runnable:
         (lambda state: not state["retrieval"].has_evidence, RunnableLambda(_refuse_at_search)),
         generate,
     )
-    return (retrieve | gate).with_config(run_name="rag_olist")
+    count = RunnablePassthrough.assign(theme_stats=RunnableLambda(stats))
+    examples = RunnablePassthrough.assign(retrieval=RunnableLambda(with_examples))
+    return (retrieve | count | examples | gate).with_config(run_name="rag_olist")
 
 
 class RagPipeline:
     """Atalho para usar a cadeia com argumentos nomeados. A cadeia fica exposta em ``chain``."""
 
-    def __init__(self, retriever: ReviewRetriever, llm: Runnable):
+    def __init__(self, retriever: ReviewRetriever, llm: Runnable, analytics: ThemeAnalytics | None = None):
         self.retriever = retriever
         self.llm = llm
-        self.chain = build_chain(retriever, llm)
+        self.analytics = analytics
+        self.chain = build_chain(retriever, llm, analytics)
 
     def ask(
         self,
