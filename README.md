@@ -164,6 +164,7 @@ A descrição completa, com o fluxo de construção da base, o papel de cada mó
 | ChromaDB | Banco vetorial embutido, com persistência em disco e filtros por metadados | [Embeddings e índice](#embeddings-e-índice-vetorial) |
 | rank-bm25 | Linha de base lexical no experimento E5 × BM25 | [Achado 1](#achado-1-a-busca-acerta-o-assunto-mas-confunde-elogio-com-reclamação) |
 | OpenAI (`gpt-4.1-mini`, pelo `ChatOpenAI`, na Responses API) | Geração da resposta, com saída estruturada | [Resposta com o LLM](#resposta-com-o-llm) |
+| Pydantic | Define o formato das respostas estruturadas do LLM (a resposta do RAG e os temas de cada avaliação). O esquema é imposto ao modelo e validado antes de o código usar a resposta | [Resposta com o LLM](#resposta-com-o-llm), [Frequência por tema](#frequência-por-tema) |
 | python-dotenv | Leitura da chave da API a partir do `.env` | — |
 | Streamlit | Interface web | [Interface](#interface) |
 | pytest | Testes automatizados | [Testes](#testes) |
@@ -239,6 +240,7 @@ A revisão deu ao projeto algo pouco comum: **duas implementações do mesmo sis
 ├── docs/
 │   ├── arquitetura.md          # arquitetura da solução
 │   ├── processo.md             # processo de construção
+│   ├── roteiro-video.md        # roteiro do vídeo de apresentação
 │   └── [IAST] - Tech Challenge - Fase 4.pdf
 ├── requirements.txt
 └── .env.example
