@@ -26,7 +26,7 @@ flowchart TD
     E7 --> E8["8. Documentação final<br/>PR #12"]
     E8 --> E9["Correção: pseudônimos de lojas<br/>PR #13"]
     E9 --> E10["9. Adoção do LangChain<br/>PR #14 e #15"]
-    E10 --> E11["10. Frequência por tema<br/>PR #16"]
+    E10 --> E11["10. Frequência por tema<br/>PR #16 e #17"]
     E5 -.->|"a busca não mede frequência:<br/>contar à parte"| E11
 
     E3 -.->|"Achado 1: o embedding confunde<br/>elogio com reclamação"| E4
@@ -60,6 +60,7 @@ As setas contínuas são a ordem das etapas. As tracejadas são as **realimenta�
 | #14 | 05/11/2026 | `refactor/langchain-busca` | 9. Adoção do LangChain | Embeddings, índice e busca com os componentes do LangChain |
 | #15 | 05/11/2026 | `refactor/langchain-cadeia` | 9. Adoção do LangChain | Prompt, LLM e cadeia LCEL; comparação medida das duas vias |
 | #16 | 05/11/2026 | `feature/temas-frequencia` | 10. Frequência por tema | Agrupamento testado, classificação pelo LLM, contagens com DuckDB |
+| #17 | 05/11/2026 | `feature/temas-na-interface` | 10. Frequência por tema | Visão Panorama e contagem real nas respostas a perguntas de frequência |
 
 ## Etapas
 
@@ -148,13 +149,15 @@ A segunda PR reescreveu o restante: o prompt como `ChatPromptTemplate`, o LLM co
 
 Com as duas versões completas e o comportamento comprovadamente igual, foi possível comparar as duas vias com medições: linhas de código, dependências, tempo, riscos e facilidade de evolução. A comparação está no README, em "Sem × com LangChain". Ela é um resultado do processo, e não estava planejada: a primeira versão não usou o LangChain por uma escolha técnica, e a comparação só existe porque essa escolha foi revista.
 
-### 10. Frequência por tema (PR #16)
+### 10. Frequência por tema (PR #16 e #17)
 
 **Objetivo:** medir quanto cada problema aparece, porque a busca semântica traz exemplos, e não contagens, e duas perguntas do enunciado pedem frequência.
 
 O plano era agrupar as avaliações negativas pelos embeddings e contar cada grupo. O experimento comparou K-Means, HDBSCAN e BERTopic e validou contra uma referência independente de não recebimento. Nenhum funcionou para contar (descoberta 20). O agrupamento ficou com o papel de descobrir os temas, e a contagem passou a ser feita por classificação: o LLM marca, em cada avaliação, os temas de uma lista fechada.
 
 Antes de classificar a base inteira, um piloto com 300 avaliações mediu o custo, revelou avaliações que nenhum tema cobria (descoberta 21) e mostrou a estabilidade entre duas rodadas (89% idênticas). A leitura das divergências com a referência mostrou que a referência erra mais do que o LLM (descoberta 22). Depois da base inteira, o cruzamento com os dados do pedido serviu de segunda validação e revelou um achado de negócio (descoberta 23).
+
+A segunda PR levou as contagens ao sistema: a visão Panorama na interface e a contagem real no contexto das perguntas de frequência sobre reclamações, com a conferência automática das porcentagens. Os testes reais revelaram uma recusa indevida em perguntas de frequência genéricas com filtro (descoberta 24), e a avaliação ampliada revelou que mudar as regras gerais do prompt afetava outras perguntas (descoberta 25).
 
 ## Descobertas que mudaram o rumo
 
@@ -185,8 +188,10 @@ Cada descoberta segue o mesmo formato: como apareceu, a evidência, o que mudou 
 | 21 | 10 | Avaliações negativas que não reclamam de nada | Piloto da classificação | 2 de 300 ficaram sem resposta: "Gostei da saia de cama box... recomendado" e "bom", elogios com nota baixa | Tema "sem reclamação" (2,3% da base); na nova rodada, nenhuma ficou sem resposta |
 | 22 | 10 | A referência independente erra mais do que o LLM | Leitura das 40 divergências do piloto | Das 21 que só o LLM marcou, todas eram não recebimento; das 19 que só a expressão regular marcou, o LLM acertou em 16 ou 17 | A referência passou a ser tratada como detector de erros grosseiros, e não como gabarito |
 | 23 | 10 | Pedidos registrados como entregues que o cliente diz não ter recebido | Cruzamento dos temas com o status da entrega | 766 avaliações de pedidos "entregues no prazo" falam em não recebimento; só 1% foi escrita antes da entrega registrada; 656 não são entregas parciais | Registrado como achado de negócio: o status "entregue" não é totalmente confiável |
+| 24 | 10 | Perguntas de frequência genéricas eram recusadas na busca | Teste real da contagem nas respostas | "Quais os problemas mais comuns?", na categoria móveis, não tinha nenhuma avaliação acima do corte, embora a contagem respondesse a ela | Sem evidência acima do corte, as perguntas de frequência de reclamações usam exemplos dos temas mais frequentes, marcados como tal na tela |
+| 25 | 10 | Mudar as regras gerais do prompt afetou outras perguntas | Avaliação ampliada com perguntas de frequência | Com as regras de porcentagem alteradas, a armadilha "horário dos Correios" foi respondida em 1 de 5 execuções; com as originais, em 0 de 5 | A exceção passou para a instrução enviada só nas perguntas de frequência; o prompt de sistema voltou a ser idêntico, e as 89 mensagens da linha de base, exceto as de frequência, voltaram idênticas |
 
-Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; a 17 no item 5 de "Avaliação e escolha do modelo"; as 18 e 19 em "Tecnologias e bibliotecas"; e as de 20 a 23 em "Frequência por tema".
+Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; a 17 no item 5 de "Avaliação e escolha do modelo"; as 18 e 19 em "Tecnologias e bibliotecas"; e as de 20 a 25 em "Frequência por tema".
 
 ## O que o processo ensinou
 
@@ -199,12 +204,12 @@ Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e í
 7. **O que a avaliação não pergunta, ela não detecta.** Nenhuma das 82 perguntas da avaliação tocava nas lojas anonimizadas, e por isso nenhuma rodada encontrou o problema dos pseudônimos, assim como a primeira calibração não encontrou o das perguntas genéricas. Cada falha descoberta virou também uma pergunta nova na avaliação, para que não volte sem ser percebida.
 8. **Refatorar contra uma linha de base.** Uma reescrita que "parece funcionar" pode ter mudado o comportamento sem ninguém perceber. Gravar as saídas exatas antes de mudar o código e exigir que voltem idênticas transformou "acho que está igual" em "está igual em 89 de 89". Foi isso que pegou a armadilha da descoberta 19, que nenhum teste unitário com dados falsos teria encontrado.
 9. **Descobrir e medir são problemas diferentes.** O agrupamento automático foi útil para encontrar os temas, mas inadequado para contá-los. Separar as duas tarefas, e usar uma técnica para cada uma, transformou uma tentativa fracassada numa etapa útil do método, e não num beco sem saída.
+10. **Uma mudança local deve ficar local.** A contagem real só precisava valer para as perguntas de frequência, mas a primeira versão alterou as regras gerais do prompt, que valem para todas. A avaliação mostrou o efeito colateral numa pergunta que nada tinha a ver com frequência. Restringir a exceção ao lugar onde ela é necessária, e conferir com a linha de base que todo o resto ficou idêntico, eliminou o efeito.
 
 ## Pendências
 
 | Pendência | Origem | Encaminhamento |
 | --- | --- | --- |
-| Frequência por tema na interface e nas respostas | Descobertas 9, 12 e 14; etapa 10 | Aba com o ranking de temas e contagens reais no contexto das perguntas de frequência |
 | Temas dos elogios | Etapa 10 | Classificar as avaliações positivas, com uma lista de temas própria |
 | Verificar se cada citação sustenta a afirmação | Avaliação da etapa 5 | Fase 2: avaliação com um segundo modelo (*LLM-as-a-judge*) |
 | Conjunto de perguntas escrito pelo próprio grupo | Descoberta 13 | Fase 2: ampliar com perguntas de usuários reais e acompanhar as recusas na busca |

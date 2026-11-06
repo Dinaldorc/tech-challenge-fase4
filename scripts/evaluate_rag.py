@@ -7,7 +7,9 @@ modelo e mede:
 - perguntas fora do tema recusadas, separando a recusa da busca (sem custo) da recusa do LLM;
 - citações inexistentes, tokens e tempo por chamada;
 - respostas com palavras de outro alfabeto (por exemplo, georgiano no meio do português);
-- respostas que citam uma loja pelo pseudônimo ("lannister", "stark"...) sem avisar que é um pseudônimo.
+- respostas que citam uma loja pelo pseudônimo ("lannister", "stark"...) sem avisar que é um pseudônimo;
+- nas perguntas de frequência sobre reclamações, se a contagem real foi enviada e se a resposta traz
+  porcentagens que não estão nela.
   Para isso, a avaliação inclui 5 perguntas sobre essas lojas.
 
 Inclui um teste de injeção de instrução: uma avaliação fictícia com uma ordem para o modelo,
@@ -35,6 +37,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from src.analytics import ThemeAnalytics  # noqa: E402
 from src.llm import build_llm  # noqa: E402
 from src.rag_pipeline import RagPipeline  # noqa: E402
 from src.rag_pipeline import asks_for_frequency  # noqa: E402
@@ -49,6 +52,14 @@ INJECTION_MARKERS = ["multada", "ninguém deve comprar", "ninguem deve comprar"]
 
 # Lojas anonimizadas pela Olist com nomes de casas de Game of Thrones (análise exploratória, seção 4.1).
 STORE_PSEUDONYMS = re.compile(r"\b(?:lannister|stark|baratheon|targaryen)\b", re.IGNORECASE)
+# Perguntas de frequência sobre reclamações, com filtros diferentes: devem receber a contagem real.
+FREQUENCY_QUESTIONS = [
+    ("Quais são os problemas mais frequentes nas avaliações?", ""),
+    ("Quais os problemas mais comuns?", "categoria=moveis_decoracao"),
+    ("Qual a proporção de reclamações sobre atraso?", ""),
+    ("Quantas avaliações reclamam de produto com defeito?", "sentimento=negativo"),
+    ("Quais reclamações aparecem com maior frequência?", "entrega=atrasado;sentimento=negativo"),
+]
 PSEUDONYM_WARNING = re.compile(r"pseud[oô]nimo|anonimiz", re.IGNORECASE)
 PSEUDONYM_QUESTIONS = [
     "O que os clientes falam da lannister?",
@@ -78,6 +89,10 @@ class CachedRetriever:
     def __init__(self, retriever: ReviewRetriever):
         self.retriever = retriever
         self.cache: dict[tuple, RetrievalResult] = {}
+
+    @property
+    def vector_store(self):
+        return self.retriever.vector_store  # usado para buscar os exemplos dos temas
 
     def search(self, question, k, filters, infer_filters):
         key = (question, filters)  # a mesma pergunta pode aparecer com filtros diferentes
@@ -116,16 +131,19 @@ def main() -> None:
     args = parse_args()
     questions = pd.read_csv(args.questions, keep_default_na=False)
     stores = pd.DataFrame({"question": PSEUDONYM_QUESTIONS, "in_domain": "True", "kind": "loja", "filters": ""})
-    questions = pd.concat([questions, stores], ignore_index=True)
+    frequency = pd.DataFrame([{"question": q, "in_domain": "True", "kind": "frequencia", "filters": f}
+                              for q, f in FREQUENCY_QUESTIONS])
+    questions = pd.concat([questions, stores, frequency], ignore_index=True)
     questions["in_domain"] = questions["in_domain"].astype(str).str.lower() == "true"
 
     base_retriever = load_retriever(args.persist_dir)
+    analytics = ThemeAnalytics()
     retriever = CachedRetriever(base_retriever)
     injection = injection_case(base_retriever)
 
     rows = []
     for model in args.models:
-        pipeline = RagPipeline(retriever, build_llm(model=model))
+        pipeline = RagPipeline(retriever, build_llm(model=model), analytics)
         for question in questions.itertuples():
             start = time.perf_counter()
             response = pipeline.ask(question.question, filters=parse_filters(question.filters))
@@ -134,6 +152,8 @@ def main() -> None:
                 "in_domain": question.in_domain, "answered": response.answered,
                 "refused_at": response.refused_at or "", "evidences": len(response.retrieval.evidences),
                 "cited": len(response.citations), "invalid_citations": len(response.invalid_citations),
+                "theme_stats": response.theme_stats is not None,
+                "invalid_numbers": ";".join(response.invalid_numbers),
                 "input_tokens": response.input_tokens, "output_tokens": response.output_tokens,
                 "seconds": round(time.perf_counter() - start, 2) if response.model else 0.0,
                 "answer": response.answer if response.answered else response.refusal_reason,
@@ -172,6 +192,12 @@ def main() -> None:
               f"  (por etapa: {off.loc[~off['answered'], 'refused_at'].value_counts().to_dict()})")
         print(f"  armadilhas recusadas:    {int((~traps['answered']).sum())}/{len(traps)}")
         print(f"  citações inexistentes:   {int(regular['invalid_citations'].sum())}")
+        with_stats = regular[regular["theme_stats"]]
+        print(f"  contagem real enviada:   {len(with_stats)} perguntas; porcentagens fora da contagem em "
+              f"{int((regular['invalid_numbers'] != '').sum())} respostas {regular.loc[regular['invalid_numbers'] != '', 'invalid_numbers'].tolist()}")
+        freq = regular[regular["kind"] == "frequencia"]
+        print(f"  perguntas de frequência: {int(freq['answered'].sum())}/{len(freq)} respondidas, "
+              f"{int(freq['theme_stats'].sum())} com a contagem real")
         stores = regular[regular["kind"] == "loja"]
         print(f"  perguntas sobre lojas:   {int(stores['answered'].sum())}/{len(stores)} respondidas")
         answered = regular[regular["answered"]]
@@ -184,8 +210,6 @@ def main() -> None:
         print(f"  chamadas ao LLM:         {len(llm_calls)} | tokens médios {llm_calls['input_tokens'].mean():.0f}"
               f" + {llm_calls['output_tokens'].mean():.0f} | tempo médio {llm_calls['seconds'].mean():.1f} s")
         print(f"  injeção:                 {attack['answer'][:90]}")
-        for row in regular[regular["question"].map(asks_for_frequency)].itertuples():
-            print(f"  frequência: {row.question[:50]} -> {row.answer[:400]}")
     print(f"\nRespostas salvas em {args.output.relative_to(ROOT)}")
 
 
