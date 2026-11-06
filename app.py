@@ -41,13 +41,14 @@ ROOT = Path(__file__).resolve().parent
 INDEX_DIR = ROOT / "chroma_db"
 
 # Perguntas do enunciado do Tech Challenge, mais uma fora do tema para demonstrar a recusa.
+# Cada exemplo tem um rótulo curto para o botão e a pergunta completa, enviada ao clicar.
 EXAMPLES = [
-    "Quais são os principais problemas relatados pelos clientes?",
-    "O que os clientes relatam sobre problemas relacionados à entrega?",
-    "Quais aspectos da experiência de compra são mais elogiados pelos clientes?",
-    "Quais padrões podem ser identificados nas avaliações de clientes insatisfeitos?",
-    "Quais avaliações sustentam que existem problemas recorrentes com o prazo de entrega?",
-    "Qual a capital da França?",
+    ("Principais problemas", "Quais são os principais problemas relatados pelos clientes?"),
+    ("Problemas de entrega", "O que os clientes relatam sobre problemas relacionados à entrega?"),
+    ("O que é elogiado", "Quais aspectos da experiência de compra são mais elogiados pelos clientes?"),
+    ("Padrões dos insatisfeitos", "Quais padrões podem ser identificados nas avaliações de clientes insatisfeitos?"),
+    ("Reclamações mais frequentes", "Quais reclamações relacionadas à entrega aparecem com maior frequência?"),
+    ("Fora do tema (recusa)", "Qual a capital da França?"),
 ]
 
 DELIVERY_LABELS = {
@@ -65,14 +66,21 @@ REFUSAL_STAGE = {
     "citacao": "na conferência das citações: a resposta não citou nenhuma avaliação existente",
 }
 
-# Cores dos gráficos: um único tom (as barras e a linha mostram uma série só) e uma escala sequencial
-# do mesmo tom para o mapa de calor, do claro (pouco) ao escuro (muito).
-CHART_COLOR = "#2a78d6"
-SEQUENTIAL_RANGE = ["#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"]
+# Cores dos gráficos, para o tema escuro (.streamlit/config.toml): um único tom, o magenta neon, nas
+# barras e na linha (uma série só), e uma escala sequencial do mesmo tom no mapa de calor, do mais
+# fechado (pouco) ao mais claro (muito). A escala foi validada para o fundo escuro: o tom mais fraco
+# ainda se destaca do fundo (2:1) e os degraus são distinguíveis.
+CHART_COLOR = "#ff2e88"
+SEQUENTIAL_RANGE = ["#7a2560", "#a8307a", "#d43c8f", "#f866a9", "#ffaed0"]
+SURFACE = "#0e0e12"
+TEXT = "#f0efec"
+SECONDARY_TEXT = "#b9b7c4"
+# A partir desta porcentagem, o texto da célula fica escuro (contraste melhor sobre o rosa claro).
+DARK_TEXT_FROM = 32
 MIN_MONTH_REVIEWS = 50  # meses com menos reclamações que isso oscilam demais em porcentagem
 MIN_STATUS_REVIEWS = 30
 
-st.set_page_config(page_title="Voz do Cliente Olist", page_icon="💬", layout="wide")
+st.set_page_config(page_title="Voz do Cliente Olist", page_icon=":material/graphic_eq:", layout="wide")
 
 
 # ---- Recursos carregados uma única vez ---------------------------------------------------------
@@ -127,10 +135,10 @@ def sidebar_filters(options: dict) -> tuple[SearchFilters, int]:
         "Restringem a busca às avaliações com esses metadados. Sem sentimento escolhido, ele é inferido da "
         "pergunta quando ela pede reclamações ou elogios."
     )
-    sentiments = st.sidebar.multiselect("Sentimento", ["negativo", "neutro", "positivo"])
-    scores = st.sidebar.multiselect("Nota", [1, 2, 3, 4, 5])
-    categories = st.sidebar.multiselect("Categoria do produto", options["categories"], format_func=label)
-    delivery = st.sidebar.multiselect("Status da entrega", options["delivery"],
+    sentiments = st.sidebar.multiselect("Sentimento", ["negativo", "neutro", "positivo"], placeholder="Todos")
+    scores = st.sidebar.multiselect("Nota", [1, 2, 3, 4, 5], placeholder="Todas")
+    categories = st.sidebar.multiselect("Categoria do produto", options["categories"], format_func=label, placeholder="Todas")
+    delivery = st.sidebar.multiselect("Status da entrega", options["delivery"], placeholder="Todos",
                                       format_func=lambda s: DELIVERY_LABELS.get(s, s))
     use_period = st.sidebar.checkbox("Filtrar por período da avaliação")
     date_from = date_to = None
@@ -315,12 +323,12 @@ def ranking_chart(counts: pd.DataFrame) -> alt.Chart:
     order = data["label"].tolist()
     base = alt.Chart(data).encode(
         y=alt.Y("label:N", sort=order, title=None, axis=alt.Axis(labelLimit=320)),
-        x=alt.X("percent:Q", title="% das avaliações negativas", axis=alt.Axis(grid=False)),
+        x=alt.X("percent:Q", title="% das avaliações negativas", axis=alt.Axis(grid=False, tickCount=7)),
         tooltip=[alt.Tooltip("label:N", title="Tema"), alt.Tooltip("reviews:Q", title="Avaliações", format=",d"),
                  alt.Tooltip("text:N", title="% das negativas")],
     )
     bars = base.mark_bar(color=CHART_COLOR, cornerRadiusEnd=4, height=18)
-    labels = base.mark_text(align="left", dx=4, color="#52514e").encode(text="text:N")
+    labels = base.mark_text(align="left", dx=4, color=SECONDARY_TEXT).encode(text="text:N")
     return (bars + labels).properties(height=34 * len(data))
 
 
@@ -340,17 +348,17 @@ def status_heatmap(by_status: pd.DataFrame, theme_order: list[str]) -> alt.Chart
     status_order = [DELIVERY_LABELS.get(v, v).replace(", ", ",|").replace(" ou ", " ou|") for v in statuses]
     base = alt.Chart(data).encode(
         x=alt.X("status:N", sort=status_order, title="Status da entrega no pedido",
-                axis=alt.Axis(labelAngle=0, labelExpr="split(datum.label, '|')", labelLimit=160)),
+                axis=alt.Axis(labelAngle=0, labelExpr="split(datum.label, '|')", labelLimit=160, labelOverlap=False)),
         y=alt.Y("label:N", sort=theme_order, title=None, axis=alt.Axis(labelLimit=320)),
         tooltip=[alt.Tooltip("label:N", title="Tema"), alt.Tooltip("status:N", title="Entrega"),
                  alt.Tooltip("reviews:Q", title="Avaliações"), alt.Tooltip("total:Q", title="Negativas com esse status"),
                  alt.Tooltip("text:N", title="% das negativas com esse status")],
     )
-    cells = base.mark_rect(stroke="#fcfcfb", strokeWidth=2).encode(
+    cells = base.mark_rect(stroke=SURFACE, strokeWidth=2).encode(
         color=alt.Color("percent:Q", title="%", scale=alt.Scale(range=SEQUENTIAL_RANGE, domain=[0, 70], clamp=True))
     )
     text = base.mark_text(fontSize=11).encode(
-        text="text:N", color=alt.condition("datum.percent > 35", alt.value("#ffffff"), alt.value("#0b0b0b"))
+        text="text:N", color=alt.condition(f"datum.percent >= {DARK_TEXT_FROM}", alt.value(SURFACE), alt.value(TEXT))
     )
     return (cells + text).properties(height=30 * len(theme_order))
 
@@ -360,7 +368,7 @@ def trend_chart(monthly: pd.DataFrame, totals: pd.DataFrame, theme: str) -> tupl
     shown = data[data["total"] >= MIN_MONTH_REVIEWS].copy()
     shown["percent"] = shown["reviews"] / shown["total"] * 100
     shown["text"] = shown["percent"].map(lambda v: f"{v:.1f}%".replace(".", ","))
-    chart = alt.Chart(shown).mark_line(color=CHART_COLOR, strokeWidth=2, point=alt.OverlayMarkDef(size=60, color=CHART_COLOR)).encode(
+    chart = alt.Chart(shown).mark_line(color=CHART_COLOR, strokeWidth=2, point=alt.OverlayMarkDef(size=60, color=CHART_COLOR, stroke=SURFACE, strokeWidth=2)).encode(
         x=alt.X("month:T", title=None, axis=alt.Axis(format="%m/%Y", grid=False, tickCount=7, labelOverlap=True)),
         y=alt.Y("percent:Q", title=f"% das negativas do mês"),
         tooltip=[alt.Tooltip("month:T", title="Mês", format="%m/%Y"), alt.Tooltip("text:N", title="% das negativas"),
@@ -380,8 +388,9 @@ def show_panorama(options: dict) -> None:
         "\"Frequência por tema\")."
     )
     with st.container(horizontal=True, vertical_alignment="bottom"):
-        categories = st.multiselect("Categoria do produto", options["categories"], format_func=label, key="pan_cat")
-        statuses = st.multiselect("Status da entrega", options["delivery"], key="pan_status",
+        categories = st.multiselect("Categoria do produto", options["categories"], format_func=label, key="pan_cat",
+                                    placeholder="Todas")
+        statuses = st.multiselect("Status da entrega", options["delivery"], key="pan_status", placeholder="Todos",
                                   format_func=lambda v: DELIVERY_LABELS.get(v, v))
         scores = st.pills("Nota", [1, 2], selection_mode="multi", key="pan_scores")
         period = st.date_input("Período da avaliação", (options["date_min"], options["date_max"]), key="pan_period",
@@ -410,14 +419,13 @@ def show_panorama(options: dict) -> None:
             st.caption(f"Fora do ranking: {without} avaliações negativas cujo texto não traz reclamação "
                        "(por exemplo, elogios dados com nota baixa).")
 
-    left, right = st.columns(2)
-    with left, st.container(border=True, height="stretch"):
+    with st.container(border=True):
         st.subheader("Tema × status da entrega")
         st.altair_chart(status_heatmap(data["by_status"], complaints["label"].tolist()), width="stretch",
                         alt="Porcentagem de cada tema por status da entrega do pedido")
         st.caption("Cada coluna soma mais de 100%, porque uma avaliação pode ter mais de um tema. "
                    f"Status com menos de {MIN_STATUS_REVIEWS} avaliações ficam de fora.")
-    with right, st.container(border=True, height="stretch"):
+    with st.container(border=True):
         st.subheader("Evolução de um tema")
         theme = st.selectbox("Tema", complaints["theme"].tolist(), format_func=THEME_LABELS.get, key="pan_theme")
         chart, hidden = trend_chart(data["monthly"], data["monthly_totals"], theme)
@@ -444,8 +452,8 @@ def show_ask(pipeline: RagPipeline, options: dict) -> None:
 
     st.markdown("**Exemplos:**")
     columns = st.columns(3)
-    for i, example in enumerate(EXAMPLES):
-        if columns[i % 3].button(example, key=f"example-{i}", width="stretch"):
+    for i, (short, example) in enumerate(EXAMPLES):
+        if columns[i % 3].button(short, key=f"example-{i}", width="stretch", help=example):
             st.session_state["question"] = example
             st.session_state["ask_now"] = True
 
@@ -468,7 +476,7 @@ def show_ask(pipeline: RagPipeline, options: dict) -> None:
 
 
 def main() -> None:
-    st.title("💬 Voz do Cliente Olist")
+    st.title(":material/graphic_eq: Voz do Cliente Olist")
     st.caption(
         "Pergunte em linguagem natural sobre as avaliações dos clientes, ou veja a frequência de cada tema. "
         "As respostas se baseiam apenas nas avaliações encontradas, citam cada uma delas e são recusadas "
@@ -485,8 +493,10 @@ def main() -> None:
         st.stop()
 
     options = load_filter_options()
-    view = st.segmented_control("Visão", [":material/chat: Perguntar", ":material/bar_chart: Panorama"],
-                                default=":material/chat: Perguntar", required=True, key="view",
+    views = [":material/chat: Perguntar", ":material/bar_chart: Panorama"]
+    # O endereço pode abrir direto no Panorama (?visao=panorama), útil para apresentações.
+    start = views[1] if st.query_params.get("visao") == "panorama" else views[0]
+    view = st.segmented_control("Visão", views, default=start, required=True, key="view",
                                 label_visibility="collapsed")
     if view.endswith("Panorama"):
         show_panorama(options)
