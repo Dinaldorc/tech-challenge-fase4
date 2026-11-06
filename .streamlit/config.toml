@@ -1,0 +1,44 @@
+# Tema da interface: escuro, "noite, rock e inovação", com destaque magenta.
+# As cores foram conferidas pelo contraste WCAG (README, "Interface") e a paleta dos gráficos
+# pelo validador de paletas para modo escuro.
+
+[theme]
+base = "dark"
+
+# Fundo quase preto, cartões um tom acima e texto claro (contraste 16,8:1).
+backgroundColor = "#0e0e12"
+secondaryBackgroundColor = "#17171f"
+textColor = "#f0efec"
+borderColor = "#2a2a36"
+
+# Magenta: o neon (#ff2e88) não dá contraste para texto branco nos botões (3,5:1), então a cor
+# principal é um magenta um pouco mais fechado (4,6:1). O neon fica para os gráficos e os links.
+primaryColor = "#e0137a"
+linkColor = "#ff5ca8"
+violetColor = "#a78bfa"
+codeBackgroundColor = "#14141b"
+
+# Tipografia: títulos condensados, com cara de cartaz de show; texto e código legíveis.
+headingFont = "Oswald:https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&display=swap"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+headingFontWeights = [700, 600, 600, 500, 500, 500]
+metricValueFontWeight = 700
+
+baseRadius = "medium"
+showWidgetBorder = true
+
+# Paleta para gráficos de várias séries (validada para o fundo escuro: magenta, azul, âmbar,
+# violeta e verde-água). Os gráficos atuais têm uma série só e usam o magenta neon.
+chartCategoricalColors = ["#ff2e88", "#3987e5", "#c98500", "#9085e9", "#199e70"]
+
+dataframeHeaderBackgroundColor = "#1d1d27"
+dataframeBorderColor = "#2a2a36"
+
+[theme.sidebar]
+backgroundColor = "#0a0a0e"
+secondaryBackgroundColor = "#17171f"
+
+[client]
+# Esconde o botão "Deploy" e o menu de desenvolvimento: a interface é para usuários, não para quem a edita.
+toolbarMode = "minimal"

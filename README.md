@@ -209,6 +209,7 @@ A revisão deu ao projeto algo pouco comum: **duas implementações do mesmo sis
 
 ```
 ├── app.py                      # interface em Streamlit
+├── .streamlit/config.toml      # tema da interface (escuro, destaque magenta)
 ├── src/
 │   ├── preprocessing.py        # base de documentos: limpeza, normalização e metadados
 │   ├── embeddings.py           # embeddings E5 com os prefixos passage:/query:
@@ -261,8 +262,9 @@ O projeto foi construído em onze etapas, da organização do repositório à me
 | Correção | #13 | Instrução sobre os pseudônimos de lojas, decisão da análise exploratória que não tinha chegado ao código |
 | 9. Adoção do LangChain | #14, #15 | Pipeline inteiro reescrito com os componentes do LangChain, com os mesmos resultados comprovados, e a comparação medida das duas vias |
 | 10. Frequência por tema | #16, #17 | Temas das reclamações medidos (agrupamento testado e descartado para contar, classificação pelo LLM validada de duas formas) e levados à interface e às respostas |
+| Identidade visual | #18 | Tema escuro com destaque magenta, cores conferidas por contraste e paletas validadas para o fundo escuro |
 
-Ao longo do caminho, 25 descobertas mudaram o rumo do projeto. Cinco exemplos:
+Ao longo do caminho, 26 descobertas mudaram o rumo do projeto. Cinco exemplos:
 
 - **O embedding confunde elogio com reclamação** (etapa 3). "Entrega atrasada" trazia "entregue no prazo". O experimento mostrou que o BM25 erra do mesmo jeito, e a correção veio dos metadados: o filtro pela nota do cliente.
 - **O critério de "maior acerto" recusava perguntas legítimas** (etapa 4). Como a recusa na busca é irreversível e o aceite indevido ainda passa pelo LLM, o critério passou a ser não recusar nenhuma pergunta legítima.
@@ -270,7 +272,7 @@ Ao longo do caminho, 25 descobertas mudaram o rumo do projeto. Cinco exemplos:
 - **O agrupamento automático não serve para contar temas** (etapa 10). As reclamações formam um contínuo e misturam vários temas na mesma avaliação. O agrupamento passou a servir só para descobrir os temas, e a contagem foi feita por classificação, validada contra uma referência independente e contra os dados do pedido.
 - **Um modelo misturava palavras de outros alfabetos** (etapa 7). Com métricas de segurança iguais, a leitura das respostas revelou o defeito no `gpt-5.4-mini` e decidiu a escolha do modelo.
 
-O processo completo, com a linha do tempo, o detalhe de cada etapa, as 25 descobertas e as lições metodológicas, está em [docs/processo.md](docs/processo.md).
+O processo completo, com a linha do tempo, o detalhe de cada etapa, as 26 descobertas e as lições metodológicas, está em [docs/processo.md](docs/processo.md).
 
 ## Decisões técnicas por etapa
 
@@ -814,7 +816,7 @@ streamlit run app.py
 
 Ela requer o índice (`python scripts/build_index.py`) e a chave no `.env`. Um seletor no topo alterna entre duas visões: **Perguntar**, descrita abaixo, e **Panorama**, com a frequência de cada tema das reclamações (ver [As contagens no sistema](#as-contagens-no-sistema)). A visão Perguntar tem três partes:
 
-1. **Pergunta.** Campo livre e seis perguntas de exemplo em botões. Cinco delas vêm do enunciado do desafio ("Quais são os principais problemas relatados pelos clientes?", "O que os clientes relatam sobre problemas relacionados à entrega?" etc.), e a sexta, "Qual a capital da França?", demonstra a recusa.
+1. **Pergunta.** Campo livre e seis perguntas de exemplo em botões, com rótulos curtos. Cinco delas vêm do enunciado do desafio ("Quais são os principais problemas relatados pelos clientes?", "Quais reclamações relacionadas à entrega aparecem com maior frequência?" etc.), e a sexta, "Qual a capital da França?", demonstra a recusa.
 2. **Resposta e evidências.** A resposta com as citações [n] e, abaixo, um cartão para cada avaliação citada: nota em estrelas, categoria, status e dias de atraso da entrega, data, número mínimo de cópias do mesmo texto, texto original e `review_id`. Quando a pergunta é recusada, a tela informa em qual barreira isso aconteceu.
 3. **"Como a resposta foi construída".** Uma seção expansível, com uma aba para cada etapa do pipeline:
 
@@ -844,6 +846,28 @@ Ela requer o índice (`python scripts/build_index.py`) e a chave no `.env`. Um s
 A busca conta só as cópias exatas que caíram na janela de candidatos, e o número de evidências é uma configuração. Para que nada disso seja lido como frequência, a tela escreve "ao menos N", explica abaixo do título das evidências o que o número significa e repete esse exemplo no aviso das perguntas de frequência. O dado de negócio ("19,6% das reclamações falam de não recebimento") exige contar sobre a base inteira.
 
 **Modelo e índice carregados uma vez.** O modelo de embeddings (1,1 GB) e o índice ficam em cache durante a sessão (`st.cache_resource`). Só a primeira pergunta espera o carregamento. Os metadados para os filtros são lidos do índice em lotes de 5.000, porque pedir as 42 mil avaliações de uma vez estoura o limite de variáveis do SQLite que o Chroma usa internamente.
+
+### Identidade visual
+
+A interface usa um tema escuro, com destaque magenta, definido inteiramente em [.streamlit/config.toml](.streamlit/config.toml), o mecanismo nativo de temas do Streamlit, sem CSS. Os títulos usam a fonte Oswald, condensada, com cara de cartaz de show; o texto, a Inter; e o código, a JetBrains Mono. As cores foram escolhidas com conferência numérica, e não no olho:
+
+| Elemento | Cor | Por quê |
+| --- | --- | --- |
+| Fundo e cartões | `#0e0e12` e `#17171f` | Quase preto, com os cartões um tom acima; o texto claro (`#f0efec`) tem contraste de 16,8:1 |
+| Botões e elementos ativos | `#e0137a` | O magenta neon (`#ff2e88`) daria só 3,5:1 com texto branco nos botões, abaixo do mínimo de 4,5:1 da WCAG. Este magenta, um pouco mais fechado, dá 4,6:1 |
+| Gráficos de uma série (ranking e evolução) | `#ff2e88` | O neon sobre o fundo escuro tem contraste de 5,5:1, e não há texto sobre ele |
+| Links | `#ff5ca8` | 6,7:1 sobre o fundo |
+| Mapa de calor | `#7a2560` → `#ffaed0` | Escala de um único tom, do mais fechado (pouco) ao mais claro (muito). Validada para o fundo escuro: até o tom mais fraco se destaca do fundo (2:1) e os degraus são distinguíveis. O texto das células troca de claro para escuro a partir de 32%, o ponto em que o contraste se inverte |
+| Paleta para gráficos de várias séries | magenta, azul, âmbar, violeta e verde-água | Hoje nenhum gráfico tem várias séries, mas o tema já define uma paleta validada para o fundo escuro, inclusive para daltonismo |
+
+A validação usou um script que calcula, para cada paleta, a faixa de luminosidade, a separação entre as cores para três tipos de daltonismo e o contraste com o fundo. Ele reprovou as primeiras tentativas: uma paleta de seis cores com verde-limão e âmbar quase iguais para quem tem protanopia, e uma escala do mapa de calor cujo tom mais fraco quase sumia no fundo. As versões finais passaram em todas as verificações. Duas limitações conhecidas: nas células do meio do mapa de calor, o contraste do texto fica perto de 4:1, um pouco abaixo do ideal para texto pequeno (o valor exato também aparece ao passar o mouse); e as fontes vêm do Google Fonts, então, sem internet, a interface usa as fontes padrão.
+
+Outros ajustes da mesma etapa, conferidos em capturas de tela do app rodando:
+- os botões de exemplo têm rótulos curtos ("Principais problemas", "Reclamações mais frequentes"), e o clique envia a pergunta completa do enunciado, que também aparece ao passar o mouse;
+- os filtros mostram "Todas" ou "Todos" quando vazios, em vez do texto padrão em inglês;
+- o mapa de calor e a evolução ocupam a largura inteira, porque, em meia largura, o mapa escondia rótulos do eixo;
+- o botão "Deploy" e o menu de desenvolvimento ficam ocultos (`toolbarMode = "minimal"`);
+- o endereço `?visao=panorama` abre o app direto no Panorama, útil em apresentações.
 
 ## Limitações e próximos passos
 
