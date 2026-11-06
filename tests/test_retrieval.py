@@ -68,8 +68,8 @@ def test_build_where_combines_filters():
             {"low_information": False},
             {"sentiment": "negativo"},
             {"product_category": {"$in": ["moveis_decoracao", "cama_mesa_banho"]}},
-            {"review_date_int": {"$gte": 20180101}},
-            {"review_date_int": {"$lte": 20180630}},
+            {"purchase_date_int": {"$gte": 20180101}},
+            {"purchase_date_int": {"$lte": 20180630}},
         ]
     }
 

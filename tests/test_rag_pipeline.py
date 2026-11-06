@@ -232,6 +232,7 @@ def analytics(tmp_path):
         "product_category": ["moveis_decoracao"] * 4,
         "delivery_status": ["atrasado"] * 4,
         "review_creation_date": pd.to_datetime(["2018-03-05"] * 4),
+        "order_purchase_timestamp": pd.to_datetime(["2018-02-20"] * 4),
     }).to_parquet(tmp_path / "docs.parquet", index=False)
     pd.DataFrame({
         "review_id": ["a", "b", "c", "d"],

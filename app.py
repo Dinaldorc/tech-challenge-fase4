@@ -11,7 +11,7 @@ Duas visões:
   recuperadas com a similaridade e o corte, contexto enviado ao LLM e decisão final), para que a
   origem de cada resposta possa ser conferida.
 - **Panorama:** a frequência de cada tema nas avaliações negativas (classificação de
-  ``data/themes/negative_themes.csv``), por categoria, status da entrega e período.
+  ``data/themes/negative_themes.csv``), por categoria, status da entrega e período da compra.
 """
 
 from __future__ import annotations
@@ -109,7 +109,7 @@ def load_filter_options() -> dict:
     for offset in range(0, count_documents(vector_store), batch):
         metadatas += vector_store.get(include=["metadatas"], limit=batch, offset=offset)["metadatas"]
     categories = Counter(meta["product_category"] for meta in metadatas)
-    dates = [meta["review_date"] for meta in metadatas]
+    dates = [meta["purchase_date"] for meta in metadatas if "purchase_date" in meta]
     return {
         "total": len(metadatas),
         "categories": [name for name, _ in categories.most_common()],
@@ -121,6 +121,15 @@ def load_filter_options() -> dict:
 
 def label(category: str) -> str:
     return category.replace("_", " ")
+
+
+def dates_label(meta: dict) -> str:
+    """Datas da compra e da avaliação, no formato dia/mês/ano."""
+    def br(value: str) -> str:
+        year, month, day = value.split("-")
+        return f"{day}/{month}/{year}"
+    review = f"avaliação {br(meta['review_date'])}"
+    return f"compra {br(meta['purchase_date'])} · {review}" if meta.get("purchase_date") else review
 
 
 def num(value: float, decimals: int = 3) -> str:
@@ -142,10 +151,10 @@ def sidebar_filters(options: dict) -> tuple[SearchFilters, int]:
     categories = st.sidebar.multiselect("Categoria do produto", options["categories"], format_func=label, placeholder="Todas")
     delivery = st.sidebar.multiselect("Status da entrega", options["delivery"], placeholder="Todos",
                                       format_func=lambda s: DELIVERY_LABELS.get(s, s))
-    use_period = st.sidebar.checkbox("Filtrar por período da avaliação")
+    use_period = st.sidebar.checkbox("Filtrar por período da compra")
     date_from = date_to = None
     if use_period:
-        period = st.sidebar.date_input("Período", (options["date_min"], options["date_max"]),
+        period = st.sidebar.date_input("Período da compra", (options["date_min"], options["date_max"]),
                                        min_value=options["date_min"], max_value=options["date_max"],
                                        format="DD/MM/YYYY")
         if isinstance(period, tuple) and len(period) == 2:
@@ -178,7 +187,7 @@ def evidence_card(number: int, evidence: Evidence) -> None:
     repeated = f" · ao menos {evidence.mentions} avaliações com este mesmo texto" if evidence.mentions > 1 else ""
     with st.container(border=True):
         st.markdown(f"**[{number}]** {stars} · {label(meta['product_category'])} · entrega: {delivery} · "
-                    f"{meta['review_date']}{repeated}")
+                    f"{dates_label(meta)}{repeated}")
         st.markdown(f"> {evidence.text}")
         if meta.get("theme_example"):
             origin = f"exemplo do tema \"{meta['theme_example']}\", escolhido pela classificação, e não pela similaridade"
@@ -372,7 +381,7 @@ def trend_chart(monthly: pd.DataFrame, totals: pd.DataFrame, theme: str) -> tupl
     shown["text"] = shown["percent"].map(lambda v: f"{v:.1f}%".replace(".", ","))
     chart = alt.Chart(shown).mark_line(color=CHART_COLOR, strokeWidth=2, point=alt.OverlayMarkDef(size=60, color=CHART_COLOR, stroke=SURFACE, strokeWidth=2)).encode(
         x=alt.X("month:T", title=None, axis=alt.Axis(format="%m/%Y", grid=False, tickCount=7, labelOverlap=True)),
-        y=alt.Y("percent:Q", title=f"% das negativas do mês"),
+        y=alt.Y("percent:Q", title="% das negativas do mês da compra"),
         tooltip=[alt.Tooltip("month:T", title="Mês", format="%m/%Y"), alt.Tooltip("text:N", title="% das negativas"),
                  alt.Tooltip("reviews:Q", title="Avaliações do tema"), alt.Tooltip("total:Q", title="Negativas no mês")],
     ).properties(height=280)
@@ -395,7 +404,7 @@ def show_panorama(options: dict) -> None:
         statuses = st.multiselect("Status da entrega", options["delivery"], key="pan_status", placeholder="Todos",
                                   format_func=lambda v: DELIVERY_LABELS.get(v, v))
         scores = st.pills("Nota", [1, 2], selection_mode="multi", key="pan_scores")
-        period = st.date_input("Período da avaliação", (options["date_min"], options["date_max"]), key="pan_period",
+        period = st.date_input("Período da compra", (options["date_min"], options["date_max"]), key="pan_period",
                                min_value=options["date_min"], max_value=options["date_max"], format="DD/MM/YYYY")
     date_from, date_to = period if isinstance(period, tuple) and len(period) == 2 else (None, None)
     filters = AnalyticsFilters(tuple(categories) or None, tuple(statuses) or None, tuple(scores) or None, date_from, date_to)
@@ -442,7 +451,8 @@ def show_panorama(options: dict) -> None:
         for row in examples.itertuples():
             stars = "★" * int(row.review_score) + "☆" * (5 - int(row.review_score))
             st.markdown(f"{stars} · {label(row.product_category)} · entrega: "
-                        f"{DELIVERY_LABELS.get(row.delivery_status, row.delivery_status)} · {row.review_date:%d/%m/%Y}")
+                        f"{DELIVERY_LABELS.get(row.delivery_status, row.delivery_status)} · "
+                        f"compra {row.purchase_date:%d/%m/%Y} · avaliação {row.review_date:%d/%m/%Y}")
             st.markdown(f"> {row.text}")
 
 

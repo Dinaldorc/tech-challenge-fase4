@@ -1,3 +1,6 @@
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+# Aviso interno do Chroma ao ler a configuração de uma coleção criada sem função de embedding
+# própria, o que é intencional (os embeddings vêm de src/embeddings.py).
+filterwarnings = ["ignore:legacy embedding function config:DeprecationWarning"]

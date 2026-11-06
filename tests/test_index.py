@@ -15,6 +15,7 @@ from src.vector_store import (
     count_documents,
     index_documents,
     iter_batches,
+    SEARCH_EF,
     open_vector_store,
     to_documents,
 )
@@ -78,7 +79,8 @@ def test_document_metadata_types(docs):
     assert all(isinstance(value, (str, int, float, bool)) for value in metadata.values())
     assert isinstance(metadata["review_score"], int)
     assert isinstance(metadata["low_information"], bool)
-    assert metadata["review_date_int"] == int(metadata["review_date"].replace("-", ""))
+    assert metadata["purchase_date_int"] == int(metadata["purchase_date"].replace("-", ""))
+    assert metadata["purchase_date"] <= metadata["review_date"]  # a compra vem antes da avaliação
 
 
 def test_document_metadata_omits_missing_delay_and_fills_order_status(docs):
@@ -170,3 +172,13 @@ def test_reopening_with_another_model_fails(tmp_path, docs):
 
     rebuilt = open_vector_store(tmp_path, other, reset=True)
     assert count_documents(rebuilt) == 0
+
+
+def test_index_uses_near_exact_search_and_fixes_old_indexes(tmp_path):
+    vector_store = open_vector_store(tmp_path, FakeEmbedder())
+    assert vector_store._collection.configuration["hnsw"]["ef_search"] == SEARCH_EF
+    # Um índice criado com o valor padrão é ajustado ao ser aberto.
+    vector_store._collection.modify(configuration={"hnsw": {"ef_search": 100}})
+    reopened = open_vector_store(tmp_path, FakeEmbedder())
+    assert reopened._collection.configuration["hnsw"]["ef_search"] == SEARCH_EF
+

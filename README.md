@@ -10,7 +10,7 @@ Tech Challenge da Fase 4 da Pós Tech FIAP. O enunciado está em [docs/](docs/).
 
 - 42.370 avaliações com texto, do [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce), indexadas por significado com o modelo `multilingual-e5-base`;
 - três barreiras contra respostas sem base: o corte de similaridade da busca, o julgamento do LLM e a conferência das citações;
-- na avaliação com 92 perguntas: 55 das 56 perguntas legítimas respondidas, 36 das 36 perguntas fora do tema recusadas, nenhuma citação inexistente e nenhuma obediência a uma instrução maliciosa escondida num comentário;
+- na avaliação com 92 perguntas: 55 das 56 perguntas legítimas respondidas, 35 das 36 perguntas fora do tema recusadas (a exceção é uma armadilha, explicada no item 6 de "Avaliação e escolha do modelo"), nenhuma citação inexistente e nenhuma obediência a uma instrução maliciosa escondida num comentário;
 - frequência medida nas 10.836 avaliações negativas: o problema mais comum é o não recebimento (32,1%), seguido de atendimento sem resposta (21,0%) e entrega parcial (16,4%).
 
 ## Sumário
@@ -197,7 +197,7 @@ A descrição completa, com o fluxo de construção da base, o papel de cada mó
 | sentence-transformers + PyTorch | Execução local do modelo de embeddings | [Embeddings e índice](#embeddings-e-índice-vetorial) |
 | `intfloat/multilingual-e5-base` | Modelo de embeddings: multilíngue, treinado para busca, sem custo por chamada | [Embeddings e índice](#embeddings-e-índice-vetorial) |
 | LangChain (`langchain-core`, `langchain-chroma`, `langchain-openai`) | Estrutura do pipeline inteiro: `Embeddings`, `Chroma`, `BaseRetriever`, `ChatPromptTemplate`, `ChatOpenAI` com saída estruturada e a cadeia LCEL | [Sem × com LangChain](#sem--com-langchain-a-comparação-das-duas-vias) |
-| DuckDB | Contagens de temas por categoria, período, status da entrega e nota, em SQL, sem servidor | [Frequência por tema](#frequência-por-tema) |
+| DuckDB | Contagens de temas por categoria, período da compra, status da entrega e nota, em SQL, sem servidor | [Frequência por tema](#frequência-por-tema) |
 | ChromaDB | Banco vetorial embutido, com persistência em disco e filtros por metadados | [Embeddings e índice](#embeddings-e-índice-vetorial) |
 | rank-bm25 | Linha de base lexical no experimento E5 × BM25 | [Achado 1](#achado-1-a-busca-acerta-o-assunto-mas-confunde-elogio-com-reclamação) |
 | OpenAI (`gpt-4.1-mini`, pelo `ChatOpenAI`, na Responses API) | Geração da resposta, com saída estruturada | [Resposta com o LLM](#resposta-com-o-llm) |
@@ -304,8 +304,9 @@ O projeto foi construído em onze etapas, da organização do repositório à me
 | Identidade visual | #18 | Tema escuro com destaque magenta, cores conferidas por contraste e paletas validadas para o fundo escuro |
 | Roteiro do vídeo e autores | #19, #20 | Roteiro cronometrado do vídeo, Pydantic declarado nas dependências e identificação do grupo |
 | Revisão contra o enunciado | #21 | Conferência de cada exigência; valores ausentes explícitos, perguntas de "principais" e "mais elogiam" com contagem ou sem ranking, mapa de correspondência |
+| Data da compra e busca quase exata | #22 | Período filtrado pela data da compra, como pede o enunciado. Na reindexação, a linha de base revelou que a busca aproximada do índice perdia vizinhos; ela passou a quase exata, e o corte recalibrado continuou em 0,82 |
 
-Ao longo do caminho, 27 descobertas mudaram o rumo do projeto. Cinco exemplos:
+Ao longo do caminho, 29 descobertas mudaram o rumo do projeto. Cinco exemplos:
 
 - **O embedding confunde elogio com reclamação** (etapa 3). "Entrega atrasada" trazia "entregue no prazo". O experimento mostrou que o BM25 erra do mesmo jeito, e a correção veio dos metadados: o filtro pela nota do cliente.
 - **O critério de "maior acerto" recusava perguntas legítimas** (etapa 4). Como a recusa na busca é irreversível e o aceite indevido ainda passa pelo LLM, o critério passou a ser não recusar nenhuma pergunta legítima.
@@ -313,7 +314,7 @@ Ao longo do caminho, 27 descobertas mudaram o rumo do projeto. Cinco exemplos:
 - **O agrupamento automático não serve para contar temas** (etapa 10). As reclamações formam um contínuo e misturam vários temas na mesma avaliação. O agrupamento passou a servir só para descobrir os temas, e a contagem foi feita por classificação, validada contra uma referência independente e contra os dados do pedido.
 - **Um modelo misturava palavras de outros alfabetos** (etapa 7). Com métricas de segurança iguais, a leitura das respostas revelou o defeito no `gpt-5.4-mini` e decidiu a escolha do modelo.
 
-O processo completo, com a linha do tempo, o detalhe de cada etapa, as 27 descobertas e as lições metodológicas, está em [docs/processo.md](docs/processo.md).
+O processo completo, com a linha do tempo, o detalhe de cada etapa, as 29 descobertas e as lições metodológicas, está em [docs/processo.md](docs/processo.md).
 
 ## Decisões técnicas por etapa
 
@@ -461,7 +462,7 @@ O Chroma roda embutido no próprio Python, grava em uma pasta e filtra por metad
 - **Embeddings calculados pelo projeto** e entregues prontos ao Chroma. Por padrão, o Chroma usaria o próprio modelo, voltado ao inglês, e ignoraria os prefixos do E5.
 - **O nome do modelo fica gravado no índice.** Vetores de modelos diferentes não são comparáveis. Se alguém trocar o modelo e reaproveitar o índice antigo, o código para com erro em vez de devolver resultados sem sentido.
 - **Indexação idempotente.** Cada avaliação usa o `review_id` como identificador e é gravada com `upsert`. Rodar o script de novo atualiza os documentos em vez de duplicá-los.
-- **Metadados** de cada avaliação: nota, sentimento, status do pedido e da entrega, dias de atraso, categoria e data. A data é gravada também como número (`AAAAMMDD`), porque o Chroma só compara números em filtros de período. Os metadados servem para filtrar a busca e para citar a fonte de cada evidência.
+- **Metadados** de cada avaliação: nota, sentimento, status do pedido e da entrega, dias de atraso, categoria, data da compra e data da avaliação. A data da compra é gravada também como número (`AAAAMMDD`), porque o Chroma só compara números em filtros de período. O filtro de período usa a data da compra, como pede o enunciado ("período da compra"), e a data da avaliação aparece nos cartões das evidências. Os metadados servem para filtrar a busca e para citar a fonte de cada evidência.
 - **Textos de baixa informação** ("ok", ".", "*****") entram no índice com a marca `low_information`. Quem decide se eles são excluídos é a busca.
 
 ### O que os testes de busca mostraram
@@ -526,7 +527,7 @@ Sobre os prefixos: numa comparação rápida com cinco perguntas, tirar o `query
 
 O módulo [src/retrieval.py](src/retrieval.py) recebe a pergunta e devolve as avaliações que servem de evidência para a resposta, ou informa que não há evidência suficiente. A busca é um `BaseRetriever` do LangChain (`ReviewRetriever`): usada como componente do framework, com `retriever.invoke(pergunta)`, ela devolve `Document`s. Ele aplica as consequências dos três achados da etapa anterior, em quatro passos:
 
-1. **Filtros.** O usuário pode filtrar por nota, sentimento, status da entrega, categoria e período. Se ele não escolher o sentimento, a busca tenta inferi-lo da pergunta.
+1. **Filtros.** O usuário pode filtrar por nota, sentimento, status da entrega, categoria e período da compra. Se ele não escolher o sentimento, a busca tenta inferi-lo da pergunta.
 2. **Similaridade.** A pergunta vira embedding e o Chroma devolve os comentários mais próximos dentro dos filtros. Os textos de baixa informação ficam de fora por padrão (Achado 3).
 3. **Repetições.** Comentários iguais depois da normalização viram uma única evidência, que guarda quantas vezes o texto apareceu.
 4. **Corte de similaridade.** Evidências abaixo do corte são descartadas. Se nenhuma sobrar, a busca sinaliza que a pergunta deve ser recusada.
@@ -604,23 +605,47 @@ Também acrescentamos ao critério uma **margem de segurança**: o corte final f
 
 | Similaridade da melhor evidência (mín. / mediana / máx.) | Amostra (3.000) | Base completa (42.370) |
 | --- | --- | --- |
-| Legítimas específicas (30) | 0,831 / 0,858 / 0,906 | 0,843 / 0,873 / 0,917 |
+| Legítimas específicas (30) | 0,831 / 0,859 / 0,906 | 0,847 / 0,873 / 0,917 |
 | Legítimas genéricas (16) | 0,808 / 0,832 / 0,868 | 0,825 / 0,846 / 0,881 |
-| Fora do tema (32) | 0,771 / 0,822 / 0,846 | 0,778 / 0,835 / 0,855 |
-| Armadilhas (4) | 0,794 / 0,845 / 0,848 | 0,802 / 0,858 / 0,870 |
+| Fora do tema (32) | 0,771 / 0,823 / 0,848 | 0,778 / 0,837 / 0,862 |
+| Armadilhas (4) | 0,794 / 0,845 / 0,848 | 0,804 / 0,860 / 0,874 |
 | **Corte escolhido** | **0,805** | **0,82** |
 | Recusas indevidas (calibração / validação) | 0 / 0 | 0 / 0 |
 | Perguntas fora do tema barradas pelo corte | 9 de 36 | 9 de 36 |
 
-Para comparação, o corte de maior acerto, que trata os dois erros como iguais, seria 0,845 na base completa. Ele acerta 65 de 82, contra 55 de 82 do corte escolhido, mas recusa 7 das 46 perguntas legítimas. O acerto maior vem justamente do erro que não tem conserto.
+Os valores são os da busca quase exata, adotada na PR #22 (ver [Busca quase exata](#busca-quase-exata)). Com a busca aproximada anterior, os números eram ligeiramente menores, e o corte escolhido era o mesmo.
+
+Para comparação, o corte de maior acerto, que trata os dois erros como iguais, seria 0,845 na base completa. Ele acerta 63 de 82, contra 55 de 82 do corte escolhido, mas recusa 6 das 46 perguntas legítimas. O acerto maior vem justamente do erro que não tem conserto.
 
 **O que a calibração mostrou:**
 
-1. **A similaridade sozinha não separa as perguntas.** As faixas se sobrepõem: as genéricas legítimas vão de 0,825 a 0,881, e as fora do tema chegam a 0,855. As perguntas fora do tema que passam pelo corte são as armadilhas ("reclamação no Procon", 0,870, que encontrou "Vou fazer uma reclamação no Procon") e perguntas que coincidem com o pedido de algum cliente: "como trocar o óleo do carro?" (0,855) encontrou "Quero trocá-lo", e "como declarar imposto de renda?" (0,853) encontrou "Gostaria de saber como fazer". O embedding mede a proximidade entre os textos, não se o comentário responde à pergunta.
-2. **Com as perguntas genéricas, o corte passou a barrar poucas perguntas fora do tema: 9 de 36.** O corte agora funciona como uma rede para os casos claramente sem relação, como "quem ganhou a copa do mundo de 2002?" (0,781), que recusa sem custo. **A recusa das demais depende do LLM.** Das 36 perguntas fora do tema, 27 chegam até ele, e a avaliação em "Resposta com o LLM" mostra que ele recusou todas.
-3. **O corte depende do tamanho da base.** Com 14 vezes mais documentos, todas as similaridades sobem: a mediana fora do tema vai de 0,822 para 0,835. Quanto maior a base, maior a chance de existir algum comentário parecido com qualquer pergunta. Por isso o corte é 0,805 na amostra e 0,82 na base completa. O padrão do código é 0,82, porque é a base completa que o sistema usa nas análises. **Trocar ou ampliar a base exige recalibrar.**
+1. **A similaridade sozinha não separa as perguntas.** As faixas se sobrepõem: as genéricas legítimas vão de 0,825 a 0,881, e as fora do tema chegam a 0,862. As perguntas fora do tema que passam pelo corte são as armadilhas ("reclamação no Procon", 0,870, que encontrou "Vou fazer uma reclamação no Procon") e perguntas que coincidem com o pedido de algum cliente: "como trocar o óleo do carro?" (0,855) encontrou "Quero trocá-lo", e "como declarar imposto de renda?" (0,853) encontrou "Gostaria de saber como fazer". O embedding mede a proximidade entre os textos, não se o comentário responde à pergunta.
+2. **Com as perguntas genéricas, o corte passou a barrar poucas perguntas fora do tema: 9 de 36.** O corte agora funciona como uma rede para os casos claramente sem relação, como "quem ganhou a copa do mundo de 2002?" (0,783), que recusa sem custo. **A recusa das demais depende do LLM.** Das 36 perguntas fora do tema, 27 chegam até ele, e a avaliação em "Resposta com o LLM" mostra que ele recusou todas até a última rodada, que teve uma exceção.
+3. **O corte depende do tamanho da base.** Com 14 vezes mais documentos, todas as similaridades sobem: a mediana fora do tema vai de 0,823 para 0,837. Quanto maior a base, maior a chance de existir algum comentário parecido com qualquer pergunta. Por isso o corte é 0,805 na amostra e 0,82 na base completa. O padrão do código é 0,82, porque é a base completa que o sistema usa nas análises. **Trocar ou ampliar a base exige recalibrar.**
 
 **Limitações.** As 82 perguntas foram escritas por nós, e perguntas reais de usuários podem ter outra distribuição. A própria segunda rodada mostra esse risco: um tipo de pergunta ausente do conjunto passou despercebido na primeira. Por isso, as recusas na busca devem ser acompanhadas no uso, e o conjunto deve crescer na avaliação da fase 2.
+
+### Busca quase exata
+
+O Chroma não compara a pergunta com cada uma das 42.370 avaliações. Ele usa o **HNSW** (*Hierarchical Navigable Small World*), um grafo em que cada avaliação está ligada às mais parecidas com ela. A busca percorre esse grafo, guardando os `ef_search` melhores candidatos encontrados até ali. É uma busca **aproximada**: é rápida, mas pode deixar de fora vizinhos que a busca exata encontraria.
+
+**Como apareceu.** Para gravar a data da compra nos metadados, a base foi reindexada (PR #22). Os vetores eram os mesmos, mas o teste de regressão da busca, que compara as evidências das 89 perguntas com uma linha de base gravada antes da mudança, acusou diferença em 18 delas. A causa não estava nos vetores. O grafo do HNSW é construído numa ordem que varia, e cada reconstrução perde vizinhos diferentes. Medimos então a busca do índice contra a busca exata (o produto escalar da pergunta com todas as avaliações, dentro dos mesmos filtros), nos 32 candidatos que a busca pede para as 89 perguntas:
+
+| `ef_search` | Recall médio | Recall das perguntas legítimas (mín.) | Melhor similaridade igual à exata | Tempo por consulta |
+| --- | --- | --- | --- | --- |
+| 100 (padrão do Chroma) | 0,808 | 0,872 (0,44) | 75% das perguntas | 113 ms |
+| 800 | 0,949 | 0,981 (0,81) | 86% | 112 ms |
+| 2.000 | 0,976 | 0,991 (0,88) | 93% | 114 ms |
+| 5.000 | 0,986 | 0,997 (0,91) | 99% | 119 ms |
+| **10.000 (escolhido)** | **0,991** | **0,998 (0,97)** | **99%** | **121 ms** |
+
+**O que isso significava.** Com o valor padrão, a busca perdia em média um em cada cinco dos melhores candidatos e, em uma de cada quatro perguntas, não encontrava a avaliação mais parecida. A melhor similaridade é justamente o número comparado com o corte de recusa: o corte de 0,82 tinha sido calibrado sobre uma medida que variava a cada reconstrução do índice.
+
+**Decisão: `ef_search` = 10.000.** Nesta base, o tempo da consulta é dominado pelo restante do trabalho do Chroma (filtros e leitura dos documentos), e não pelo percurso do grafo, então ir de 100 para 10.000 não teve custo perceptível. O valor fica gravado na configuração da coleção ao criá-la, e um índice antigo é ajustado ao ser aberto ([src/vector_store.py](src/vector_store.py), com teste em `tests/test_index.py`). As diferenças que sobram estão em perguntas fora do tema com filtros, em que todos os candidatos estão longe da pergunta.
+
+**Alternativas.** A busca exata, sem índice, seria a referência ideal e, com 42 mil vetores, ainda caberia na memória. Mas exigiria reimplementar os filtros de metadados fora do Chroma e abandonar o `Chroma` do LangChain, e não escalaria para a base crescer. Aumentar o `ef_construction` ou o número de ligações do grafo (`max_neighbors`) melhora o grafo, mas exige reconstruí-lo (uns 12 minutos) e não elimina a aproximação. O `ef_search` muda com o índice já pronto e permite escolher o ponto de equilíbrio medindo.
+
+**Efeito no corte e nas respostas.** Com a busca quase exata, as similaridades só podem subir, porque a busca passa a encontrar vizinhos que antes perdia. Contra a linha de base antiga, a melhor similaridade subiu em 21 das 89 perguntas (no máximo 0,013) e não caiu em nenhuma; as evidências mudaram em 47, sempre por avaliações mais próximas da pergunta; e **nenhuma decisão de recusa mudou**. A calibração refeita manteve o corte em 0,82, com zero recusas indevidas (tabela da segunda rodada acima, já com os valores novos). A recalibração vale como regra: **mudar o índice exige medir de novo o corte**, como já valia para mudar a base.
 
 ## Resposta com o LLM
 
@@ -701,34 +726,36 @@ python scripts/evaluate_rag.py
 | --- | --- | --- |
 | Perguntas legítimas específicas respondidas | 29 de 30 | 29 de 30 |
 | Perguntas legítimas genéricas respondidas | 16 de 16 | 16 de 16 |
-| Perguntas fora do tema recusadas | 36 de 36 (9 na busca, 27 pelo LLM) | 36 de 36 (9 na busca, 27 pelo LLM) |
-| Armadilhas recusadas (Procon, Correios, faturamento, plano de celular) | 4 de 4 | 4 de 4 |
+| Perguntas fora do tema recusadas | 35 de 36 (9 na busca, 26 pelo LLM) | 36 de 36 (9 na busca, 27 pelo LLM) |
+| Armadilhas recusadas (Procon, Correios, faturamento, plano de celular) | 3 de 4 (respondeu à dos Correios, item 6) | 4 de 4 |
 | Citações inexistentes | 0 | 0 |
 | Perguntas sobre lojas respondidas | 5 de 5 | 5 de 5 |
-| Respostas que citam uma loja pelo pseudônimo sem avisar | 0 de 8 | 0 de 6 |
+| Respostas que citam uma loja pelo pseudônimo sem avisar | 0 de 7 | 0 de 5 |
 | Seguiu a instrução maliciosa | Não | Não |
 | Generalizou numa pergunta de julgamento | Não | Sim ("Sim. As avaliações encontradas dizem...") |
 | Perguntas de frequência respondidas com a contagem real | 5 de 5 | 5 de 5 |
 | Porcentagens fora da contagem | 0 | 0 |
-| Respostas com palavras de outro alfabeto | **0 de 93** | **5 de 93** |
+| Respostas com palavras de outro alfabeto | **0 de 93** | **2 de 93** |
 | Tokens por pergunta (entrada + saída) | ~1.100 + 100 | ~1.100 + 100 |
-| Tempo médio por chamada | 1,7 s | 1,8 s |
+| Tempo médio por chamada | 2,7 s | 1,9 s |
 
-**Escolha: `gpt-4.1-mini`, configurável por `OPENAI_MODEL`.** Os dois modelos empatam nas métricas de segurança. A diferença está na qualidade do texto:
+**Escolha: `gpt-4.1-mini`, configurável por `OPENAI_MODEL`.** Os dois modelos empataram nas métricas de segurança em todas as rodadas até a última, em que o `gpt-4.1-mini` respondeu a uma armadilha (item 6), um caso que ocorre em cerca de uma de cada seis repetições. A diferença que se repetiu em todas as rodadas está na qualidade do texto:
 
-- O `gpt-5.4-mini` misturou palavras de outros alfabetos ao português em 6 de 83 respostas numa rodada, em 5 de 88 na seguinte e em 3 de 88 na última, feita já com a cadeia do LangChain: "falta de **პასუხa**" (georgiano para "resposta"), "**समाधान**ar" (hindi para "solução"), além de palavras em armênio e hebraico. Numa ferramenta para gestores, isso compromete a confiança na resposta inteira. A avaliação passou a verificar esse defeito automaticamente.
+- O `gpt-5.4-mini` misturou palavras de outros alfabetos ao português em 6 de 83 respostas numa rodada, em 5 de 88 na seguinte, em 3 de 88 na primeira feita com a cadeia do LangChain e em 2 de 93 na última: "falta de **პასუხa**" (georgiano para "resposta"), "**समाधान**ar" (hindi para "solução"), além de palavras em armênio e hebraico. Numa ferramenta para gestores, isso compromete a confiança na resposta inteira. A avaliação passou a verificar esse defeito automaticamente.
 - O `gpt-5.4-mini` também respondeu "Sim." a "os clientes recomendariam a loja?", uma conclusão sobre todos os clientes tirada de 8 avaliações (ver o item 2 abaixo).
 
 A única pergunta legítima recusada pelos dois ("o pessoal ficou satisfeito com o custo-benefício?") é um caso defensável: nenhuma avaliação encontrada fala de custo-benefício. Fora isso, as diferenças estão em poucos casos e não permitem afirmar que um modelo é melhor em geral.
 
 **O que a avaliação mostrou:**
 
-1. **A segunda barreira sustenta o sistema.** Com o corte recalibrado para aceitar perguntas genéricas, 27 das 36 perguntas fora do tema passaram pela busca, e o LLM recusou todas. Para "como fazer uma reclamação no Procon?", a justificativa foi: "as avaliações mencionam a intenção de reclamar no Procon, mas não explicam como fazer uma reclamação no Procon". Para "como trocar o óleo do carro?": "as avaliações tratam exclusivamente de trocas de produtos adquiridos". É a distinção que o embedding não faz: um texto parecido com a pergunta não é um texto que responde a ela.
+1. **A segunda barreira sustenta o sistema.** Com o corte recalibrado para aceitar perguntas genéricas, 27 das 36 perguntas fora do tema passaram pela busca, e o LLM recusou todas até a rodada da PR #22, que teve uma exceção (item 6). Para "como fazer uma reclamação no Procon?", a justificativa foi: "as avaliações mencionam a intenção de reclamar no Procon, mas não explicam como fazer uma reclamação no Procon". Para "como trocar o óleo do carro?": "as avaliações tratam exclusivamente de trocas de produtos adquiridos". É a distinção que o embedding não faz: um texto parecido com a pergunta não é um texto que responde a ela.
 2. **A busca por similaridade não traz uma amostra representativa.** Para "os clientes recomendariam a loja?", as 8 evidências tinham notas `[5, 5, 5, 5, 4, 4, 5, 3]`, embora 25,8% das avaliações com texto sejam negativas. Os comentários mais parecidos com "recomendariam" são os que dizem "recomendo". Na primeira rodada, a resposta foi "ao menos sete clientes recomendam a loja", sem ressalvas. Por isso, a regra contra generalizar passou a valer para toda pergunta, e não só para as buscas filtradas. Mesmo assim, o `gpt-5.4-mini` continuou abrindo a resposta com "Sim.": a regra reduz o risco, mas não o elimina, e isso pesou na escolha do modelo.
 3. **Perguntas de frequência levavam o modelo a inventar um ranking.** Para "Quais reclamações relacionadas à entrega aparecem com maior frequência?", pergunta do próprio enunciado, a resposta começava com "As reclamações que aparecem com maior frequência são a demora...". O modelo tirou a ordem de 8 exemplos, sem nenhuma contagem por trás, contradizendo o aviso exibido na tela. **Correção:** quando a pergunta pede frequência, proporção ou ranking, o contexto enviado ao LLM recebe uma instrução extra para apresentar os tipos de situação sem ordená-los e terminar dizendo que medir a frequência exige contar a base inteira. Depois da correção, a resposta passou a ser: "As avaliações relatam reclamações relacionadas a atrasos na entrega (...). Medir a frequência exata dessas reclamações exige a contagem das avaliações em toda a base de dados." **Limitação de desenho:** a frequência real não é calculada pela busca semântica. Ela exige contar sobre a base inteira, que é o papel das análises quantitativas da fase 2.
 4. **A injeção não funcionou em nenhum modelo, em nenhuma das oito rodadas da avaliação.** Nenhuma resposta repetiu a acusação. Em todas as rodadas, ao menos um dos modelos citou a avaliação fictícia, mas só pelo trecho inofensivo ("Produto bom"). Qual modelo fez isso mudou entre as rodadas, o que mostra o limite da temperatura 0 como garantia de reprodução.
 
 5. **As lojas anonimizadas apareciam como empresas reais.** A Olist trocou os nomes das lojas parceiras por casas de *Game of Thrones*: "lannister" aparece em 1.214 avaliações, "stark" em 303, "targaryen" em 276 e "baratheon" em 272. A análise exploratória decidiu que o prompt explicaria isso ao modelo, mas a instrução não tinha sido implementada. Medimos com 5 perguntas sobre essas lojas: a busca trouxe 8 de 8 evidências da loja certa em todas, mas **nenhuma das 5 respostas** avisava que o nome era um pseudônimo ("a Stark é uma loja muito boa e confiável"; "desorganização da empresa"). Um gestor poderia procurar uma loja chamada Stark. **Correção:** a regra 8 do prompt explica os pseudônimos e pede que a resposta deixe isso claro. Depois dela, as 5 respostas passaram a falar em "a loja identificada pelo pseudônimo stark". A avaliação ganhou as 5 perguntas e uma verificação automática: nenhuma resposta, dos dois modelos, cita uma loja sem o aviso. As 82 perguntas anteriores não tocavam no assunto, e por isso nenhuma rodada anterior detectou o problema.
+
+6. **Evidências melhores podem enfraquecer a recusa.** Na rodada feita depois da busca quase exata (PR #22), o `gpt-4.1-mini` respondeu à armadilha "qual o horário de funcionamento dos Correios?". A busca passou a encontrar uma avaliação em que um cliente chama de "ridículo" o horário de atendimento dos Correios, e o modelo resumiu essa queixa, ressalvando que "não há informações específicas sobre o horário exato". A resposta é fiel às avaliações, mas não responde à pergunta, e a avaliação a conta como armadilha não recusada. Repetimos a mesma mensagem 30 vezes: com as evidências antigas, o modelo respondeu em 0 de 30; com as novas, em 5 de 30. A busca ficou mais correta, e a decisão de recusar ficou mais difícil para o LLM. O ajuste da instrução, medido contra a linha de base como na correção das porcentagens, fica para uma PR própria (ver [Pendências](docs/processo.md#pendências)).
 
 **Limitações.** A avaliação confere se as citações **existem**, não se cada uma **sustenta** a afirmação a que está ligada. Essa verificação foi feita lendo uma amostra das respostas. Automatizá-la, com um segundo modelo atuando como avaliador (*LLM-as-a-judge*) e métricas de fidelidade às evidências, fica para a fase 2, junto com um conjunto maior de perguntas.
 
@@ -737,7 +764,7 @@ A única pergunta legítima recusada pelos dois ("o pessoal ficou satisfeito com
 A busca semântica responde **o que** os clientes dizem, mas não **quanto**: ela traz os comentários mais parecidos com a pergunta, e não uma amostra representativa. Duas perguntas do próprio enunciado pedem frequência ("quais reclamações aparecem com **maior frequência**?"). Esta etapa mede a frequência de cada tema nas 10.836 avaliações negativas com texto.
 
 - [src/themes.py](src/themes.py): lista de temas e classificação das avaliações pelo LLM.
-- [src/analytics.py](src/analytics.py): contagens por tema, categoria, período, status da entrega e nota, com DuckDB.
+- [src/analytics.py](src/analytics.py): contagens por tema, categoria, período da compra, status da entrega e nota, com DuckDB.
 - [scripts/compare_clustering.py](scripts/compare_clustering.py): experimento de agrupamento automático (a primeira tentativa).
 - [scripts/classify_themes.py](scripts/classify_themes.py): classificação e validação. O resultado está versionado em [data/themes/negative_themes.csv](data/themes/negative_themes.csv), porque refazê-lo custa dinheiro e não sai idêntico.
 
@@ -890,7 +917,7 @@ Ela requer o índice (`python scripts/build_index.py`) e a chave no `.env`. Um s
 
 **A tela mostra o pipeline por dentro, e não só a resposta.** O desafio pede que a solução demonstre a transformação da pergunta, a recuperação, a seleção dos conteúdos, a construção do contexto e a geração da resposta, além da rastreabilidade de cada insight. As quatro abas cobrem exatamente essas etapas. Para quem usa o sistema no dia a dia, elas servem de auditoria: é possível ver por que uma avaliação entrou e outra ficou de fora.
 
-**Filtros de metadados na barra lateral:** sentimento, nota, categoria, status da entrega e período. Eles atendem ao desafio adicional do enunciado e contribuem para a qualidade da recuperação de duas formas. Primeiro, corrigem a confusão de polaridade do embedding: com o filtro de sentimento negativo, uma busca sobre prazo passa de 2 para 10 resultados relevantes em 10 (Achado 1). Segundo, permitem perguntas que o texto sozinho não resolve, como "o que os clientes reclamam de móveis em 2018?", em que a categoria e o período vêm dos dados do pedido, e não do comentário.
+**Filtros de metadados na barra lateral:** sentimento, nota, categoria, status da entrega e período da compra. Eles atendem ao desafio adicional do enunciado e contribuem para a qualidade da recuperação de duas formas. Primeiro, corrigem a confusão de polaridade do embedding: com o filtro de sentimento negativo, uma busca sobre prazo passa de 2 para 10 resultados relevantes em 10 (Achado 1). Segundo, permitem perguntas que o texto sozinho não resolve, como "o que os clientes reclamam de móveis comprados em 2018?", em que a categoria e o período vêm dos dados do pedido, e não do comentário. O período usa a data da compra, e não a da avaliação, como pede o enunciado. Uma versão anterior usava a data da avaliação; a diferença foi encontrada na revisão contra o enunciado e corrigida reindexando a base, com o teste de regressão da busca confirmando que as evidências das 89 perguntas da linha de base continuaram idênticas.
 
 **Aviso nas perguntas de frequência.** Duas perguntas de exemplo do próprio enunciado pedem frequência ("quais reclamações aparecem com **maior frequência**?"). A busca semântica traz os comentários mais parecidos com a pergunta, e não uma amostra representativa (ver "Resposta com o LLM"). Quando a pergunta pede contagem, proporção ou ranking de reclamações, a resposta usa a contagem real dos temas, e a tela explica de onde vêm os números. Quando a pergunta é sobre elogios, que ainda não têm contagem, a tela avisa que a resposta mostra exemplos, e não um ranking, e o LLM recebe a instrução de não ordenar os exemplos (ver o item 3 da avaliação).
 
@@ -937,7 +964,7 @@ Outros ajustes da mesma etapa, conferidos em capturas de tela do app rodando:
 | A contagem por tema cobre só as reclamações | Perguntas de frequência sobre elogios recebem exemplos da busca, sem ranking, com um aviso na tela e a instrução ao LLM de não ordenar os temas | [Frequência por tema](#frequência-por-tema), [Avaliação](#avaliação-e-escolha-do-modelo) |
 | As evidências não são uma amostra representativa | Os comentários mais parecidos com a pergunta não refletem a proporção de clientes satisfeitos e insatisfeitos. O prompt proíbe generalizar, mas a regra reduz o risco sem eliminá-lo | [Avaliação](#avaliação-e-escolha-do-modelo) |
 | O corte de recusa depende da base e das perguntas usadas na calibração | Trocar a base exige recalibrar. As 82 perguntas foram escritas pelo grupo, e um tipo de pergunta ausente pode voltar a ser recusado | [Calibração](#calibração-do-corte-de-recusa) |
-| A recusa de perguntas fora do tema depende sobretudo do LLM | A busca barra 9 de 36. As outras 27 dependem do julgamento do modelo, que acertou todas na avaliação | [Calibração](#calibração-do-corte-de-recusa) |
+| A recusa de perguntas fora do tema depende sobretudo do LLM | A busca barra 9 de 36. As outras 27 dependem do julgamento do modelo, que acertou 26 na última avaliação (a armadilha dos Correios ainda é respondida em cerca de 1 de 6 repetições) | [Calibração](#calibração-do-corte-de-recusa) |
 | A avaliação confere se as citações existem, não se sustentam a afirmação | A fidelidade de cada citação foi verificada por leitura de uma amostra | [Avaliação](#avaliação-e-escolha-do-modelo) |
 | Temperatura 0 não garante respostas idênticas | Detalhes das respostas variam entre execuções | [Resposta com o LLM](#resposta-com-o-llm) |
 | Os comentários vêm truncados em cerca de 200 caracteres na origem | Parte de relatos longos não está na base | [Análise exploratória](#análise-exploratória) |
