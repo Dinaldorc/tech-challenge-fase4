@@ -2,7 +2,7 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import Runnable, RunnableLambda
 
-from src.llm import RagAnswer, build_llm
+from src.llm import MAX_OUTPUT_TOKENS, RagAnswer, build_chat_model, build_llm, tolerate_format_errors
 from src.rag_pipeline import (
     FREQUENCY_NOTE,
     FREQUENCY_STATS_NOTE,
@@ -214,6 +214,27 @@ def test_answer_outside_the_structured_format_is_refused():
     response = RagPipeline(StubRetriever(EVIDENCES), FakeLLM(None)).ask("reclamações?")
     assert not response.answered and response.refused_at == "llm"
     assert "formato" in response.refusal_reason
+
+
+
+def test_malformed_answer_raised_by_the_sdk_becomes_a_refusal():
+    # A resposta cortada no meio do JSON: o SDK da OpenAI levanta o erro de validação do Pydantic.
+    def truncated(prompt_value):
+        RagAnswer.model_validate_json('{"answered":true,"answer":"x","cited":[1,2,1,2,')
+
+    llm = tolerate_format_errors(RunnableLambda(truncated))
+    response = RagPipeline(StubRetriever(EVIDENCES), llm).ask("quanto custa?")
+    assert not response.answered and response.refused_at == "llm"
+    assert "formato" in response.refusal_reason
+
+
+def test_chat_model_limits_the_answer_size(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-teste")
+    assert build_chat_model().max_tokens == MAX_OUTPUT_TOKENS
+
+
+def test_system_prompt_refuses_facts_the_reviews_do_not_give():
+    assert "dado objetivo" in SYSTEM_PROMPT and "caso exato da pergunta" in SYSTEM_PROMPT
 
 
 # ---- Contagem real nas perguntas de frequência -------------------------------------------------

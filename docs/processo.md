@@ -29,9 +29,11 @@ flowchart TD
     E10 --> E11["10. Frequência por tema<br/>PR #16 e #17"]
     E11 --> E12["Identidade visual<br/>PR #18"]
     E12 --> E13["Revisão contra o enunciado<br/>PR #21 e #22"]
+    E13 --> E14["Correção: armadilhas de dado objetivo<br/>PR #23"]
     E13 -.->|"'principais' e 'mais elogiam'<br/>passam a ser frequência"| E11
     E5 -.->|"a busca não mede frequência:<br/>contar à parte"| E11
     E13 -.->|"reindexação: a busca aproximada<br/>perdia vizinhos"| E3
+    E14 -.->|"evidências melhores:<br/>nova regra de recusa"| E5
 
     E3 -.->|"Achado 1: o embedding confunde<br/>elogio com reclamação"| E4
     E3 -.->|"Achado 2: similaridades<br/>numa faixa estreita"| E4
@@ -70,6 +72,7 @@ As setas contínuas são a ordem das etapas. As tracejadas são as **realimenta�
 | #20 | 06/11/2026 | `docs/autores` | Documentação | Identificação dos autores e do grupo |
 | #21 | 06/11/2026 | `fix/sintonia-enunciado` | Revisão contra o enunciado | Valores ausentes explícitos, detector de frequência ampliado, exemplo de exploração de volta e mapa de correspondência |
 | #22 | 06/11/2026 | `feature/data-da-compra` | Revisão contra o enunciado | Período filtrado pela data da compra; base reindexada, busca quase exata (`ef_search` = 10.000) e corte recalibrado (continuou em 0,82) |
+| #23 | 06/11/2026 | `fix/armadilha-correios` | Correção | Regra para perguntas que pedem um dado ausente das avaliações; resposta malformada convertida em recusa |
 
 ## Etapas
 
@@ -174,6 +177,12 @@ A segunda PR levou as contagens ao sistema: a visão Panorama na interface e a c
 
 A conferência encontrou sete pontos (descoberta 27). A PR #21 corrigiu os que não mexiam no índice: perguntas com "principais" e "mais elogiam" passaram a ser tratadas como perguntas de frequência, os valores ausentes ganharam uma seção própria e a documentação ganhou um mapa de correspondência com o enunciado. A PR #22 trocou o filtro de período, que usava a data da avaliação, pela data da compra, como o enunciado pede. Isso exigiu reindexar a base, e o teste de regressão da busca, refeito depois da reindexação, revelou que a busca aproximada do Chroma perdia vizinhos (descoberta 28). A busca passou a quase exata, e o corte foi recalibrado antes de seguir: continuou em 0,82. A avaliação completa, refeita em seguida, mostrou o outro lado da melhora: com evidências mais próximas, o LLM passou a responder, às vezes, uma das armadilhas (descoberta 29).
 
+### Correção: armadilhas de dado objetivo (PR #23)
+
+**Objetivo:** fazer o LLM voltar a recusar a armadilha dos Correios, sem ajustar a instrução só a essa pergunta.
+
+Antes de mudar o prompt, testamos perguntas novas do mesmo tipo, e o problema se mostrou geral (descoberta 30). A regra foi redigida com um conjunto de perguntas e conferida com outro, escrito depois. Cada conjunto tinha armadilhas e perguntas legítimas sobre os mesmos assuntos, e cada pergunta foi repetida de 10 a 20 vezes, porque o comportamento do modelo varia mesmo com temperatura 0. A leitura das respostas revelou um efeito colateral da primeira versão da regra, numa pergunta de opinião, corrigido antes da avaliação completa. As medições também revelaram que uma resposta malformada derrubava a pergunta (descoberta 31).
+
 ## Descobertas que mudaram o rumo
 
 Cada descoberta segue o mesmo formato: como apareceu, a evidência, o que mudou e onde está documentada em detalhe.
@@ -209,8 +218,10 @@ Cada descoberta segue o mesmo formato: como apareceu, a evidência, o que mudou 
 | 27 | Revisão | Perguntas do enunciado com "principais" e "mais elogiam" não eram tratadas como perguntas de frequência | Conferência de cada exigência do enunciado contra o sistema | "O que os clientes mais elogiam?" foi respondida com um ranking tirado de 8 avaliações; "Quais são os principais problemas?" não recebia a contagem. A mesma revisão encontrou o tratamento de valores ausentes sem uma seção própria, um exemplo de exploração do enunciado fora das demonstrações e o filtro de período usando a data da avaliação, e não a da compra | Detector ampliado (13 perguntas da avaliação passaram a receber a contagem), seção de valores ausentes, exemplo de volta e mapa de correspondência; a data da compra entrou no índice e nos filtros na PR #22 |
 | 28 | Revisão | A busca do índice era aproximada e perdia vizinhos | Teste de regressão da busca depois de reindexar a base com a data da compra | Com os mesmos vetores, 18 das 89 perguntas mudaram de evidências. Contra a busca exata, o índice recuperava em média 81% dos 32 melhores candidatos e errava a melhor similaridade em 25% das perguntas | `ef_search` de 100 para 10.000: recall de 99,8% nas perguntas legítimas, sem custo de tempo perceptível; corte recalibrado, mantido em 0,82, e nenhuma decisão de recusa alterada |
 | 29 | Revisão | Evidências melhores levaram o LLM a responder uma armadilha | Avaliação completa depois da busca quase exata | "qual o horário de funcionamento dos Correios?" passou a trazer uma queixa sobre o horário de atendimento dos Correios; com a mesma mensagem repetida 30 vezes, o `gpt-4.1-mini` respondeu em 5 (com as evidências antigas, em 0 de 30) | Resultado registrado na avaliação (35 de 36 fora do tema recusadas); ajuste da instrução do LLM numa PR própria, medido contra a linha de base |
+| 30 | Correção | O LLM respondia perguntas que pedem um dado ausente com um resumo do assunto | Teste de generalização da descoberta 29, com perguntas novas | "telefone do SAC" respondida em 20 de 20 repetições, "frete para Manaus" em 18, "colchão de casal" em 18 (com preços de colchas); a primeira versão da regra fez a pergunta do custo-benefício passar de 0 para 6 de 10 respostas com o mesmo defeito | Regra no prompt de sistema, redigida com um conjunto de perguntas e conferida com outro, novo: armadilhas a 0%, legítimas a 100%; avaliação completa de volta a 36 de 36 |
+| 31 | Correção | Uma resposta malformada derrubava a pergunta | Repetições da medição da descoberta 30 | O modelo repetiu os números das citações até a resposta ser cortada; o SDK da OpenAI levantou o erro de validação antes da proteção do pipeline, e a pergunta terminou numa exceção | Tamanho máximo de 1.000 tokens (a maior resposta usou 285) e erro de formato convertido em recusa, conferido com a API real e com um teste |
 
-Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; a 17 no item 5 de "Avaliação e escolha do modelo"; as 18 e 19 em "Tecnologias e bibliotecas"; as de 20 a 25 em "Frequência por tema"; a 26 em "Identidade visual"; a 27 em "As contagens no sistema"; a 28 em "Busca quase exata"; e a 29 no item 6 de "Avaliação e escolha do modelo".
+Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; a 17 no item 5 de "Avaliação e escolha do modelo"; as 18 e 19 em "Tecnologias e bibliotecas"; as de 20 a 25 em "Frequência por tema"; a 26 em "Identidade visual"; a 27 em "As contagens no sistema"; a 28 em "Busca quase exata"; as 29 e 30 no item 6 de "Avaliação e escolha do modelo"; e a 31 no item 7.
 
 ## O que o processo ensinou
 
@@ -225,12 +236,12 @@ Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e í
 9. **Descobrir e medir são problemas diferentes.** O agrupamento automático foi útil para encontrar os temas, mas inadequado para contá-los. Separar as duas tarefas, e usar uma técnica para cada uma, transformou uma tentativa fracassada numa etapa útil do método, e não num beco sem saída.
 10. **Uma mudança local deve ficar local.** A contagem real só precisava valer para as perguntas de frequência, mas a primeira versão alterou as regras gerais do prompt, que valem para todas. A avaliação mostrou o efeito colateral numa pergunta que nada tinha a ver com frequência. Restringir a exceção ao lugar onde ela é necessária, e conferir com a linha de base que todo o resto ficou idêntico, eliminou o efeito.
 11. **A linha de base vigia também a infraestrutura.** A reindexação não mudou nenhuma linha da busca nem nenhum vetor, e mesmo assim a linha de base acusou diferenças. Sem ela, a troca da data teria passado como uma mudança só de metadados, e o corte de recusa continuaria apoiado numa medida que variava a cada reconstrução do índice. Comparar com a busca exata separou o que era aproximação do que seria erro.
+12. **Uma métrica melhor não é uma resposta melhor.** A primeira versão da regra da PR #23 fez uma pergunta legítima passar de recusada a respondida, o que pela métrica é uma melhora. A leitura da resposta mostrou o defeito que a regra combatia: um resumo de outro assunto, com a ressalva de que o ponto perguntado não aparecia. Uma mudança no prompt também precisa ser conferida com perguntas que não participaram da sua redação, ou ela só mostra que decorou a prova.
 
 ## Pendências
 
 | Pendência | Origem | Encaminhamento |
 | --- | --- | --- |
-| Armadilha dos Correios respondida em cerca de 1 de 6 repetições | Descoberta 29 | Ajustar a instrução do LLM para recusar quando as avaliações falam do assunto mas não respondem à pergunta, conferindo com a linha de base e a avaliação completa |
 | Temas dos elogios | Etapa 10 | Classificar as avaliações positivas, com uma lista de temas própria |
 | Verificar se cada citação sustenta a afirmação | Avaliação da etapa 5 | Fase 2: avaliação com um segundo modelo (*LLM-as-a-judge*) |
 | Conjunto de perguntas escrito pelo próprio grupo | Descoberta 13 | Fase 2: ampliar com perguntas de usuários reais e acompanhar as recusas na busca |
