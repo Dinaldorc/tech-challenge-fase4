@@ -85,9 +85,9 @@ Roteiro para o vídeo de até 7 minutos pedido no enunciado. Ele está cronometr
 
 **Tela:** o `docs/processo.md` no GitHub, na tabela "Descobertas que mudaram o rumo".
 
-> O projeto foi construído em etapas, cada uma numa pull request, e registramos 31 descobertas que mudaram o rumo. Três exemplos. Primeiro: o corte de similaridade, calibrado só com perguntas específicas, recusava perguntas genéricas como "quais as principais reclamações?". Ampliamos as perguntas de calibração e recalibramos. Segundo: tentamos contar os temas agrupando os embeddings, com K-Means e BERTopic, e medimos que não funcionava, porque as reclamações misturam vários temas. O agrupamento ficou para descobrir os temas, e a contagem passou para a classificação. Terceiro: reescrevemos o pipeline com o LangChain sob a regra de não mudar o comportamento, e conferimos que as 89 perguntas de teste devolviam exatamente as mesmas evidências. Foi esse teste que pegou um método do LangChain que devolve a distância no lugar da similaridade.
+> O projeto foi construído em etapas, cada uma numa pull request, e registramos 33 descobertas que mudaram o rumo. Três exemplos. Primeiro: o corte de similaridade, calibrado só com perguntas específicas, recusava perguntas genéricas como "quais as principais reclamações?". Ampliamos as perguntas de calibração e recalibramos. Segundo: tentamos contar os temas agrupando os embeddings, com K-Means e BERTopic, e medimos que não funcionava, porque as reclamações misturam vários temas. O agrupamento ficou para descobrir os temas, e a contagem passou para a classificação. Terceiro: reescrevemos o pipeline com o LangChain sob a regra de não mudar o comportamento, e conferimos que as 89 perguntas de teste devolviam exatamente as mesmas evidências. Foi esse teste que pegou um método do LangChain que devolve a distância no lugar da similaridade.
 >
-> Na avaliação final, com 92 perguntas, o sistema respondeu 55 das 56 legítimas, recusou todas as fora do tema, não inventou nenhuma citação e não obedeceu a uma instrução maliciosa escondida num comentário.
+> Na avaliação final, com 95 perguntas, o sistema respondeu 55 das 56 legítimas, recusou todas as fora do tema, não inventou nenhuma citação e não obedeceu a uma instrução maliciosa escondida num comentário.
 
 ## Trecho 8 — Fechamento (6:25 a 6:40)
 

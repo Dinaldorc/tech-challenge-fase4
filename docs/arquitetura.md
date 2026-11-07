@@ -119,7 +119,7 @@ As dependências vão sempre das peças básicas para as compostas: `vector_stor
 | Corte de similaridade | 0,82 | `src/retrieval.py` | Calibração com 82 perguntas (README, "Calibração do corte de recusa") |
 | Evidências por resposta (`k`) | 8 | `src/retrieval.py` | Configurável na interface, de 3 a 15 |
 | Janela de candidatos | 4 × `k`, dobrando até 512 | `src/retrieval.py` | Correção do caso "não recebi o produto" (README, "Busca das evidências") |
-| Modelo de linguagem | `gpt-4.1-mini` | `src/llm.py`, `OPENAI_MODEL` | Avaliação com 92 perguntas contra o `gpt-5.4-mini` (README, "Avaliação e escolha do modelo") |
+| Modelo de linguagem | `gpt-4.1-mini` | `src/llm.py`, `OPENAI_MODEL` | Avaliação com 95 perguntas contra o `gpt-5.4-mini` (README, "Avaliação e escolha do modelo") |
 | Temperatura | 0 | `src/llm.py`, `LLM_TEMPERATURE` | Reprodutibilidade e fidelidade às evidências |
 
 ## Dados e artefatos

@@ -1,8 +1,9 @@
-"""Contagens de temas das avaliações negativas, com DuckDB.
+"""Contagens de temas das avaliações, com DuckDB: reclamações (negativas) e elogios (positivas).
 
-Junta a classificação por tema (``data/themes/negative_themes.csv``, gerada por
-``scripts/classify_themes.py``) com os metadados da base de documentos e conta por tema, categoria,
-período da compra, status da entrega e nota.
+Junta a classificação por tema (``data/themes/negative_themes.csv`` ou ``positive_themes.csv``, geradas
+por ``scripts/classify_themes.py``) com os metadados da base de documentos e conta por tema, categoria,
+período da compra, status da entrega e nota. ``ThemeAnalytics()`` conta as reclamações e
+``ThemeAnalytics.praise()`` conta os elogios, com as mesmas consultas.
 
 Por que DuckDB: as perguntas de frequência são consultas analíticas (agrupar, contar, cruzar), que o
 SQL expressa diretamente. O DuckDB lê o CSV e o Parquet no próprio processo, sem servidor, e desdobra
@@ -25,6 +26,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_THEMES = ROOT / "data" / "themes" / "negative_themes.csv"
+PRAISE_THEMES_FILE = ROOT / "data" / "themes" / "positive_themes.csv"
 DEFAULT_DOCUMENTS = ROOT / "data" / "processed" / "reviews_docs.parquet"
 
 THEME_LABELS = {
@@ -42,6 +44,19 @@ THEME_LABELS = {
     "sem_reclamacao": "Sem reclamação no texto",
 }
 
+PRAISE_LABELS = {
+    "entrega_prazo": "Entrega no prazo ou rápida",
+    "qualidade_produto": "Qualidade do produto",
+    "conforme_anuncio": "Produto conforme o anúncio",
+    "atendimento": "Bom atendimento",
+    "embalagem": "Boa embalagem",
+    "preco": "Preço ou custo-benefício",
+    "confianca_recompra": "Confiança na loja e recompra",
+    "elogio_generico": "Elogio sem motivo específico",
+    "ressalva": "Com ressalva ou reclamação",
+    "sem_elogio": "Sem elogio no texto",
+}
+
 
 @dataclass(frozen=True)
 class AnalyticsFilters:
@@ -53,11 +68,13 @@ class AnalyticsFilters:
 
 
 class ThemeAnalytics:
-    """Consultas de frequência sobre as avaliações negativas classificadas por tema."""
+    """Consultas de frequência sobre as avaliações classificadas por tema (reclamações, por padrão)."""
 
-    def __init__(self, themes_path: Path = DEFAULT_THEMES, documents_path: Path = DEFAULT_DOCUMENTS):
+    def __init__(self, themes_path: Path = DEFAULT_THEMES, documents_path: Path = DEFAULT_DOCUMENTS,
+                 labels: dict[str, str] = THEME_LABELS):
+        self.labels = labels
         self.connection = duckdb.connect()
-        # Uma linha por avaliação negativa classificada, com os metadados usados nos filtros.
+        # Uma linha por avaliação classificada, com os metadados usados nos filtros.
         self.connection.execute(f"""
             CREATE VIEW reviews AS
             SELECT d.review_id, d.text, d.review_score, d.product_category, d.delivery_status,
@@ -72,6 +89,11 @@ class ThemeAnalytics:
             CREATE VIEW review_themes AS
             SELECT * EXCLUDE (themes), unnest(themes) AS theme FROM reviews
         """)
+
+    @classmethod
+    def praise(cls, themes_path: Path = PRAISE_THEMES_FILE, documents_path: Path = DEFAULT_DOCUMENTS) -> ThemeAnalytics:
+        """As mesmas consultas sobre os elogios das avaliações positivas."""
+        return cls(themes_path, documents_path, PRAISE_LABELS)
 
     def _sql(self, query: str, params: list):
         """Consulta num cursor próprio: cada cursor é uma conexão independente com o mesmo banco,
@@ -109,7 +131,7 @@ class ThemeAnalytics:
             FROM review_themes{where}
             GROUP BY theme ORDER BY reviews DESC, theme
         """, params + params).df()
-        frame.insert(1, "label", frame["theme"].map(THEME_LABELS))
+        frame.insert(1, "label", frame["theme"].map(self.labels))
         return frame
 
     def theme_by(self, column: str, filters: AnalyticsFilters | None = None, top: int | None = None) -> pd.DataFrame:
@@ -147,7 +169,7 @@ class ThemeAnalytics:
         """, params + [theme, limit]).df()
 
     def monthly_totals(self, filters: AnalyticsFilters | None = None) -> pd.DataFrame:
-        """Avaliações negativas por mês da compra: a base para mostrar cada tema em proporção, e não em volume."""
+        """Avaliações classificadas por mês da compra: a base para mostrar cada tema em proporção, e não em volume."""
         where, params = self._where(filters)
         return self._sql(f"""
             SELECT date_trunc('month', purchase_date) AS month, count(*) AS total
