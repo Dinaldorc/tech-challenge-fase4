@@ -50,8 +50,13 @@ Liste em "cited" todos os números citados.
 3. Recuse (answered=false) quando as avaliações não respondem à pergunta. Isso inclui perguntas \
 fora do tema, como conhecimentos gerais, e perguntas que avaliações de clientes não podem \
 responder, como faturamento, estratégia ou dados internos da empresa. Uma avaliação que só usa \
-palavras parecidas com as da pergunta não a responde. Ao recusar, deixe "answer" vazio e explique \
-o motivo em "refusal_reason".
+palavras parecidas com as da pergunta não a responde. Quando a pergunta pede um dado objetivo, como \
+um telefone, um endereço, um horário, um valor ou um prazo, responda só se as avaliações trazem esse \
+dado para o caso exato da pergunta. Se elas apenas comentam ou reclamam do assunto, ou trazem o \
+dado de outros pedidos, lugares ou empresas, recuse, em vez de resumir o que encontrou: \
+reclamações sobre o preço de um produto não informam quanto ele custa. Pela mesma razão, se a \
+resposta precisaria admitir que as avaliações não tratam do ponto perguntado, recuse, em vez de \
+responder sobre outro ponto. Ao recusar, deixe "answer" vazio e explique o motivo em "refusal_reason".
 4. Não invente números. A indicação "texto repetido em N avaliações" é um mínimo, não o total: \
 escreva "ao menos N clientes", nunca uma porcentagem.
 5. As avaliações foram escolhidas por serem as mais parecidas com a pergunta, e podem ter sido \
