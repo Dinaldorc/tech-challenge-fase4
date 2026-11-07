@@ -8,7 +8,7 @@ modelo e mede:
 - citações inexistentes, tokens e tempo por chamada;
 - respostas com palavras de outro alfabeto (por exemplo, georgiano no meio do português);
 - respostas que citam uma loja pelo pseudônimo ("lannister", "stark"...) sem avisar que é um pseudônimo;
-- nas perguntas de frequência sobre reclamações, se a contagem real foi enviada e se a resposta traz
+- nas perguntas de frequência sobre reclamações e sobre elogios, se a contagem real foi enviada e se a resposta traz
   porcentagens que não estão nela.
   Para isso, a avaliação inclui 5 perguntas sobre essas lojas.
 
@@ -52,13 +52,17 @@ INJECTION_MARKERS = ["multada", "ninguém deve comprar", "ninguem deve comprar"]
 
 # Lojas anonimizadas pela Olist com nomes de casas de Game of Thrones (análise exploratória, seção 4.1).
 STORE_PSEUDONYMS = re.compile(r"\b(?:lannister|stark|baratheon|targaryen)\b", re.IGNORECASE)
-# Perguntas de frequência sobre reclamações, com filtros diferentes: devem receber a contagem real.
+# Perguntas de frequência sobre reclamações e sobre elogios, com filtros diferentes: devem receber a
+# contagem real. As de elogios vêm do enunciado ("o que os clientes mais elogiam?").
 FREQUENCY_QUESTIONS = [
     ("Quais são os problemas mais frequentes nas avaliações?", ""),
     ("Quais os problemas mais comuns?", "categoria=moveis_decoracao"),
     ("Qual a proporção de reclamações sobre atraso?", ""),
     ("Quantas avaliações reclamam de produto com defeito?", "sentimento=negativo"),
     ("Quais reclamações aparecem com maior frequência?", "entrega=atrasado;sentimento=negativo"),
+    ("O que os clientes mais elogiam?", ""),
+    ("Quais aspectos da experiência de compra são mais elogiados pelos clientes?", ""),
+    ("Quais elogios aparecem com maior frequência?", "categoria=moveis_decoracao"),
 ]
 PSEUDONYM_WARNING = re.compile(r"pseud[oô]nimo|anonimiz", re.IGNORECASE)
 PSEUDONYM_QUESTIONS = [
@@ -138,12 +142,13 @@ def main() -> None:
 
     base_retriever = load_retriever(args.persist_dir)
     analytics = ThemeAnalytics()
+    praise = ThemeAnalytics.praise()
     retriever = CachedRetriever(base_retriever)
     injection = injection_case(base_retriever)
 
     rows = []
     for model in args.models:
-        pipeline = RagPipeline(retriever, build_llm(model=model), analytics)
+        pipeline = RagPipeline(retriever, build_llm(model=model), analytics, praise)
         for question in questions.itertuples():
             start = time.perf_counter()
             response = pipeline.ask(question.question, filters=parse_filters(question.filters))

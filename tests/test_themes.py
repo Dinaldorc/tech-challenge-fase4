@@ -5,7 +5,16 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from src.analytics import THEME_LABELS, AnalyticsFilters, ThemeAnalytics
-from src.themes import PROMPT, THEMES, BatchThemes, ReviewThemes, describe_themes, format_reviews, parse_batch
+from src.themes import (
+    PRAISE,
+    PROMPT,
+    THEMES,
+    BatchThemes,
+    ReviewThemes,
+    describe_themes,
+    format_reviews,
+    parse_batch,
+)
 
 # ---- Classificação -----------------------------------------------------------------------------
 
@@ -47,6 +56,36 @@ def test_parse_batch_without_structured_answer():
 def test_schema_rejects_unknown_theme():
     with pytest.raises(ValueError):
         ReviewThemes(number=1, themes=["tema_inventado"])
+
+
+
+# ---- Elogios -----------------------------------------------------------------------------------
+
+
+def test_praise_prompt_lists_its_own_themes():
+    messages = PRAISE.prompt.invoke({"themes": describe_themes(PRAISE.themes), "reviews": "[1] x"}).to_messages()
+    assert "avaliações positivas" in messages[0].content
+    assert all(f"- {theme}:" in messages[0].content for theme in PRAISE.themes)
+    assert "elogio_generico" in messages[0].content and "ressalva" in messages[0].content
+
+
+def test_praise_schema_accepts_only_praise_themes():
+    item = PRAISE.output_model.model_fields["items"].annotation.__args__[0]
+    item(number=1, themes=["entrega_prazo"])
+    with pytest.raises(ValueError):
+        item(number=1, themes=["atraso"])
+
+
+def test_generic_praise_is_dropped_when_a_reason_is_given():
+    item = PRAISE.output_model.model_fields["items"].annotation.__args__[0]
+    parsed = PRAISE.output_model(items=[
+        item(number=1, themes=["elogio_generico", "entrega_prazo"]),
+        item(number=2, themes=["elogio_generico"]),
+        item(number=3, themes=["elogio_generico", "ressalva"]),  # ressalva não é motivo do elogio
+    ])
+    themes, missing = parse_batch({"raw": AIMessage(content=""), "parsed": parsed}, size=3, taxonomy=PRAISE)
+    assert themes == [["entrega_prazo"], ["elogio_generico"], ["elogio_generico", "ressalva"]]
+    assert missing == 0
 
 
 # ---- Contagens com DuckDB ----------------------------------------------------------------------

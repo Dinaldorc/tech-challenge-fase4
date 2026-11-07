@@ -16,6 +16,7 @@ from src.rag_pipeline import (
     check_numbers,
     format_evidence,
     is_complaint_scope,
+    scope_of,
     search_refusal_reason,
     theme_stats_for,
 )
@@ -303,12 +304,13 @@ def test_frequency_question_receives_the_real_count(analytics):
         "Quais reclamações aparecem com maior frequência?")
     assert response.answered and response.theme_stats is not None
     user = llm.prompts[0][1]
-    assert FREQUENCY_STATS_NOTE in user and "Contagem real (4 avaliações" in user
+    assert FREQUENCY_STATS_NOTE.format(reviews="avaliações negativas") in user
+    assert "Contagem real (4 avaliações negativas" in user
     assert FREQUENCY_NOTE not in user
     assert response.invalid_numbers == ()
 
 
-def test_regular_question_and_praise_frequency_keep_the_previous_prompt(analytics):
+def test_regular_question_and_praise_frequency_without_praise_count_keep_the_previous_prompt(analytics):
     llm = FakeLLM(answer("Atraso [1].", [1]))
     RagPipeline(StubRetriever(EVIDENCES), llm, analytics).ask("Quais as reclamações sobre entrega?")
     assert "Contagem real" not in llm.prompts[0][1]
@@ -328,4 +330,48 @@ def test_without_evidence_a_frequency_question_uses_theme_examples(analytics):
     assert all(e.metadata.get("theme_example") for e in response.retrieval.evidences)
     regular = RagPipeline(StubRetriever([]), FakeLLM(answer("x [1]", [1])), analytics).ask("Quais os problemas?")
     assert regular.refused_at == "busca"  # sem pedido de frequência, a recusa na busca continua
+
+
+@pytest.fixture()
+def praise_analytics(tmp_path):
+    import pandas as pd
+
+    from src.analytics import ThemeAnalytics
+
+    pd.DataFrame({
+        "review_id": ["p", "q", "r", "s"],
+        "text": ["Chegou antes do prazo", "Ótimo", "Bonito, mas atrasou", "Ainda não recebi"],
+        "review_score": [5, 5, 4, 5],
+        "product_category": ["moveis_decoracao"] * 4,
+        "delivery_status": ["no_prazo"] * 4,
+        "review_creation_date": pd.to_datetime(["2018-03-05"] * 4),
+        "order_purchase_timestamp": pd.to_datetime(["2018-02-20"] * 4),
+    }).to_parquet(tmp_path / "praise_docs.parquet", index=False)
+    pd.DataFrame({
+        "review_id": ["p", "q", "r", "s"],
+        "themes": ["entrega_prazo", "elogio_generico", "qualidade_produto;ressalva", "sem_elogio"],
+    }).to_csv(tmp_path / "praise.csv", index=False)
+    return ThemeAnalytics.praise(tmp_path / "praise.csv", tmp_path / "praise_docs.parquet")
+
+
+def test_scope_of_picks_the_side_of_the_base():
+    assert scope_of(SearchFilters(sentiments=("negativo",))) == "reclamacoes"
+    assert scope_of(SearchFilters(sentiments=("positivo",))) == "elogios"
+    assert scope_of(SearchFilters(review_scores=(4, 5))) == "elogios"
+    assert scope_of(SearchFilters(review_scores=(3, 4))) is None
+    assert scope_of(SearchFilters()) is None
+
+
+def test_praise_frequency_question_receives_the_praise_count(analytics, praise_analytics):
+    retriever = StubRetriever(EVIDENCES, filters=SearchFilters(sentiments=("positivo",)))
+    llm = FakeLLM(answer("Entrega no prazo em 25,0% [1].", [1]))
+    response = RagPipeline(retriever, llm, analytics, praise_analytics).ask("O que os clientes mais elogiam?")
+    stats = response.theme_stats
+    assert stats is not None and stats.kind == "elogios" and stats.total == 4
+    # "ressalva" e "sem_elogio" não são elogios: ficam fora da contagem enviada ao LLM.
+    assert {theme for theme, *_ in stats.counts} == {"entrega_prazo", "elogio_generico", "qualidade_produto"}
+    user = llm.prompts[0][1]
+    assert FREQUENCY_STATS_NOTE.format(reviews="avaliações positivas") in user
+    assert "Contagem real (4 avaliações positivas" in user and "Entrega no prazo ou rápida" in user
+    assert response.invalid_numbers == ()
 

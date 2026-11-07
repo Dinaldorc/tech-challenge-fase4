@@ -30,10 +30,12 @@ flowchart TD
     E11 --> E12["Identidade visual<br/>PR #18"]
     E12 --> E13["Revisão contra o enunciado<br/>PR #21 e #22"]
     E13 --> E14["Correção: armadilhas de dado objetivo<br/>PR #23"]
+    E14 --> E15["Frequência dos elogios<br/>PR #24"]
     E13 -.->|"'principais' e 'mais elogiam'<br/>passam a ser frequência"| E11
     E5 -.->|"a busca não mede frequência:<br/>contar à parte"| E11
     E13 -.->|"reindexação: a busca aproximada<br/>perdia vizinhos"| E3
     E14 -.->|"evidências melhores:<br/>nova regra de recusa"| E5
+    E11 -.->|"mesma técnica:<br/>elogios"| E15
 
     E3 -.->|"Achado 1: o embedding confunde<br/>elogio com reclamação"| E4
     E3 -.->|"Achado 2: similaridades<br/>numa faixa estreita"| E4
@@ -73,6 +75,7 @@ As setas contínuas são a ordem das etapas. As tracejadas são as **realimenta�
 | #21 | 06/11/2026 | `fix/sintonia-enunciado` | Revisão contra o enunciado | Valores ausentes explícitos, detector de frequência ampliado, exemplo de exploração de volta e mapa de correspondência |
 | #22 | 06/11/2026 | `feature/data-da-compra` | Revisão contra o enunciado | Período filtrado pela data da compra; base reindexada, busca quase exata (`ef_search` = 10.000) e corte recalibrado (continuou em 0,82) |
 | #23 | 06/11/2026 | `fix/armadilha-correios` | Correção | Regra para perguntas que pedem um dado ausente das avaliações; resposta malformada convertida em recusa |
+| #24 | 06/11/2026 | `feature/temas-elogios` | Frequência por tema | Temas dos elogios descobertos e classificados nas 27.527 avaliações positivas; Panorama e respostas com a contagem dos elogios |
 
 ## Etapas
 
@@ -183,6 +186,12 @@ A conferência encontrou sete pontos (descoberta 27). A PR #21 corrigiu os que n
 
 Antes de mudar o prompt, testamos perguntas novas do mesmo tipo, e o problema se mostrou geral (descoberta 30). A regra foi redigida com um conjunto de perguntas e conferida com outro, escrito depois. Cada conjunto tinha armadilhas e perguntas legítimas sobre os mesmos assuntos, e cada pergunta foi repetida de 10 a 20 vezes, porque o comportamento do modelo varia mesmo com temperatura 0. A leitura das respostas revelou um efeito colateral da primeira versão da regra, numa pergunta de opinião, corrigido antes da avaliação completa. As medições também revelaram que uma resposta malformada derrubava a pergunta (descoberta 31).
 
+### Frequência dos elogios (PR #24)
+
+**Objetivo:** responder com números à pergunta do enunciado "o que os clientes mais elogiam?", que até aqui recebia exemplos sem ranking.
+
+Repetimos o caminho da etapa 10 sobre as avaliações positivas: o agrupamento para descobrir os temas, um piloto de 300 avaliações para medir custo, estabilidade e problemas da instrução, a base inteira e as duas validações (uma referência independente e o status do pedido). O piloto mostrou que o modelo não seguia a regra do tema exclusivo, e a regra passou para o código (descoberta 32). A base inteira revelou as ressalvas nas notas altas (descoberta 33). Antes da avaliação completa, a linha de base confirmou que só as perguntas de frequência sobre elogios mudaram.
+
 ## Descobertas que mudaram o rumo
 
 Cada descoberta segue o mesmo formato: como apareceu, a evidência, o que mudou e onde está documentada em detalhe.
@@ -220,8 +229,10 @@ Cada descoberta segue o mesmo formato: como apareceu, a evidência, o que mudou 
 | 29 | Revisão | Evidências melhores levaram o LLM a responder uma armadilha | Avaliação completa depois da busca quase exata | "qual o horário de funcionamento dos Correios?" passou a trazer uma queixa sobre o horário de atendimento dos Correios; com a mesma mensagem repetida 30 vezes, o `gpt-4.1-mini` respondeu em 5 (com as evidências antigas, em 0 de 30) | Resultado registrado na avaliação (35 de 36 fora do tema recusadas); ajuste da instrução do LLM numa PR própria, medido contra a linha de base |
 | 30 | Correção | O LLM respondia perguntas que pedem um dado ausente com um resumo do assunto | Teste de generalização da descoberta 29, com perguntas novas | "telefone do SAC" respondida em 20 de 20 repetições, "frete para Manaus" em 18, "colchão de casal" em 18 (com preços de colchas); a primeira versão da regra fez a pergunta do custo-benefício passar de 0 para 6 de 10 respostas com o mesmo defeito | Regra no prompt de sistema, redigida com um conjunto de perguntas e conferida com outro, novo: armadilhas a 0%, legítimas a 100%; avaliação completa de volta a 36 de 36 |
 | 31 | Correção | Uma resposta malformada derrubava a pergunta | Repetições da medição da descoberta 30 | O modelo repetiu os números das citações até a resposta ser cortada; o SDK da OpenAI levantou o erro de validação antes da proteção do pipeline, e a pergunta terminou numa exceção | Tamanho máximo de 1.000 tokens (a maior resposta usou 285) e erro de formato convertido em recusa, conferido com a API real e com um teste |
+| 32 | Elogios | O modelo não seguia a regra do tema exclusivo | Piloto da classificação dos elogios | "Elogio sem motivo específico" vinha junto com motivos específicos em 69% das avaliações; reescrever a instrução reduziu para 53% | A regra passou para o código (`Taxonomy.normalize`), que é determinístico: o tema ficou com 23% das avaliações, só as que não dizem o motivo |
+| 33 | Elogios | Uma em cada nove notas altas traz uma reclamação | Classificação da base inteira dos elogios | 3.005 avaliações positivas (10,9%) com ressalva, e 32,6% nos pedidos atrasados, contra 10,2% nos entregues no prazo | "Com ressalva" fica fora do ranking dos elogios e aparece à parte no Panorama |
 
-Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; a 17 no item 5 de "Avaliação e escolha do modelo"; as 18 e 19 em "Tecnologias e bibliotecas"; as de 20 a 25 em "Frequência por tema"; a 26 em "Identidade visual"; a 27 em "As contagens no sistema"; a 28 em "Busca quase exata"; as 29 e 30 no item 6 de "Avaliação e escolha do modelo"; e a 31 no item 7.
+Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; a 17 no item 5 de "Avaliação e escolha do modelo"; as 18 e 19 em "Tecnologias e bibliotecas"; as de 20 a 25 em "Frequência por tema"; a 26 em "Identidade visual"; a 27 em "As contagens no sistema"; a 28 em "Busca quase exata"; as 29 e 30 no item 6 de "Avaliação e escolha do modelo"; a 31 no item 7; e as 32 e 33 em "Frequência dos elogios".
 
 ## O que o processo ensinou
 
@@ -237,11 +248,11 @@ Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e í
 10. **Uma mudança local deve ficar local.** A contagem real só precisava valer para as perguntas de frequência, mas a primeira versão alterou as regras gerais do prompt, que valem para todas. A avaliação mostrou o efeito colateral numa pergunta que nada tinha a ver com frequência. Restringir a exceção ao lugar onde ela é necessária, e conferir com a linha de base que todo o resto ficou idêntico, eliminou o efeito.
 11. **A linha de base vigia também a infraestrutura.** A reindexação não mudou nenhuma linha da busca nem nenhum vetor, e mesmo assim a linha de base acusou diferenças. Sem ela, a troca da data teria passado como uma mudança só de metadados, e o corte de recusa continuaria apoiado numa medida que variava a cada reconstrução do índice. Comparar com a busca exata separou o que era aproximação do que seria erro.
 12. **Uma métrica melhor não é uma resposta melhor.** A primeira versão da regra da PR #23 fez uma pergunta legítima passar de recusada a respondida, o que pela métrica é uma melhora. A leitura da resposta mostrou o defeito que a regra combatia: um resumo de outro assunto, com a ressalva de que o ponto perguntado não aparecia. Uma mudança no prompt também precisa ser conferida com perguntas que não participaram da sua redação, ou ela só mostra que decorou a prova.
+13. **Regra que o modelo não segue de forma consistente vai para o código.** A regra do tema exclusivo estava clara na instrução e foi ignorada em metade dos casos. Reescrevê-la ajudou pouco. Tudo o que pode ser decidido de forma determinística a partir da saída do modelo deve ser decidido no código, onde é testável e não varia entre execuções.
 
 ## Pendências
 
 | Pendência | Origem | Encaminhamento |
 | --- | --- | --- |
-| Temas dos elogios | Etapa 10 | Classificar as avaliações positivas, com uma lista de temas própria |
 | Verificar se cada citação sustenta a afirmação | Avaliação da etapa 5 | Fase 2: avaliação com um segundo modelo (*LLM-as-a-judge*) |
 | Conjunto de perguntas escrito pelo próprio grupo | Descoberta 13 | Fase 2: ampliar com perguntas de usuários reais e acompanhar as recusas na busca |

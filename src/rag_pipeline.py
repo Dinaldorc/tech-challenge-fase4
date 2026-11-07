@@ -33,7 +33,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableBranch, RunnableLambda, RunnablePassthrough
 
 from src.preprocessing import normalize_for_comparison
-from src.analytics import THEME_LABELS, AnalyticsFilters, ThemeAnalytics
+from src.analytics import AnalyticsFilters, ThemeAnalytics
 from src.retrieval import DEFAULT_K, Evidence, RetrievalResult, ReviewRetriever, SearchFilters
 
 REFUSAL_MESSAGE = "Não encontrei avaliações de clientes que permitam responder a essa pergunta."
@@ -147,7 +147,7 @@ FREQUENCY_NOTE = (
 
 FREQUENCY_STATS_NOTE = (
     "Atenção: a pergunta pede frequência, proporção ou ranking. Abaixo está a contagem real dos temas, "
-    "calculada sobre todas as avaliações negativas classificadas por tema, com os mesmos filtros da busca. "
+    "calculada sobre todas as {reviews} classificadas por tema, com os mesmos filtros da busca. "
     "Use essa contagem para ordenar e quantificar os temas, copiando os números exatamente como aparecem, e "
     "cite as avaliações numeradas como exemplos de cada tema, com [n]. Esta contagem é a única exceção às "
     "regras 4 e 5: as porcentagens e os totais dela podem ser usados, mas só copiados exatamente, e nenhum "
@@ -159,14 +159,19 @@ FREQUENCY_STATS_NOTE = (
 
 @dataclass(frozen=True)
 class ThemeStats:
-    """Contagem real dos temas das reclamações, nos filtros da pergunta."""
+    """Contagem real dos temas das reclamações ou dos elogios, nos filtros da pergunta."""
 
     total: int
     counts: list[tuple[str, str, int, float]]  # (tema, rótulo, avaliações, proporção)
     filters: str
+    kind: str = "reclamacoes"  # "reclamacoes" ou "elogios"
+
+    @property
+    def reviews(self) -> str:
+        return "avaliações negativas" if self.kind == "reclamacoes" else "avaliações positivas"
 
     def as_text(self) -> str:
-        lines = [f"Contagem real ({format_int(self.total)} avaliações negativas classificadas; filtros: {self.filters}):"]
+        lines = [f"Contagem real ({format_int(self.total)} {self.reviews} classificadas; filtros: {self.filters}):"]
         for _, label, reviews, share in self.counts:
             lines.append(f"- {label}: {format_int(reviews)} avaliações ({format_share(share)})")
         return "\n".join(lines)
@@ -180,35 +185,59 @@ def format_share(share: float) -> str:
     return f"{share * 100:.1f}%".replace(".", ",")
 
 
+# Cada contagem cobre só um lado da base: as reclamações, as avaliações negativas (notas 1 e 2); os
+# elogios, as positivas (notas 4 e 5). Temas que não são reclamação nem elogio ficam fora da contagem
+# enviada ao LLM, e os que não dizem o assunto não fornecem exemplos.
+SCOPES = {
+    "reclamacoes": {"sentiment": "negativo", "scores": (1, 2), "not_counted": {"sem_reclamacao"},
+                    "no_examples": {"outro"}},
+    "elogios": {"sentiment": "positivo", "scores": (4, 5), "not_counted": {"sem_elogio", "ressalva"},
+                "no_examples": {"elogio_generico"}},
+}
+
+
+def scope_of(filters: SearchFilters) -> str | None:
+    """Qual contagem vale para a busca: só quando ela está restrita a um dos lados da base."""
+    for kind, scope in SCOPES.items():
+        if filters.sentiments:
+            if set(filters.sentiments) == {scope["sentiment"]}:
+                return kind
+        elif filters.review_scores and set(filters.review_scores) <= set(scope["scores"]):
+            return kind
+    return None
+
+
 def is_complaint_scope(filters: SearchFilters) -> bool:
-    """A contagem cobre só avaliações negativas: só vale quando a busca também está restrita a elas."""
-    if filters.sentiments:
-        return set(filters.sentiments) == {"negativo"}
-    return bool(filters.review_scores) and set(filters.review_scores) <= {1, 2}
+    """A contagem das reclamações cobre só avaliações negativas: só vale quando a busca também está restrita a elas."""
+    return scope_of(filters) == "reclamacoes"
 
 
-def to_analytics_filters(filters: SearchFilters) -> AnalyticsFilters:
+def to_analytics_filters(filters: SearchFilters, kind: str = "reclamacoes") -> AnalyticsFilters:
+    scores = SCOPES[kind]["scores"]
     return AnalyticsFilters(
         categories=filters.categories,
         delivery_statuses=filters.delivery_statuses,
-        review_scores=tuple(s for s in filters.review_scores if s in (1, 2)) if filters.review_scores else None,
+        review_scores=tuple(s for s in filters.review_scores if s in scores) if filters.review_scores else None,
         date_from=filters.date_from,
         date_to=filters.date_to,
     )
 
 
-def theme_stats_for(analytics: ThemeAnalytics, filters: SearchFilters) -> ThemeStats | None:
+def theme_stats_for(analytics: ThemeAnalytics | None, filters: SearchFilters,
+                    praise: ThemeAnalytics | None = None) -> ThemeStats | None:
     """Contagem dos temas com os mesmos filtros da busca, ou ``None`` se ela não se aplica."""
-    if not is_complaint_scope(filters):
+    kind = scope_of(filters)
+    source = {"reclamacoes": analytics, "elogios": praise}.get(kind) if kind else None
+    if source is None:
         return None
-    analytics_filters = to_analytics_filters(filters)
-    total = analytics.total(analytics_filters)
+    analytics_filters = to_analytics_filters(filters, kind)
+    total = source.total(analytics_filters)
     if total == 0:
         return None
-    frame = analytics.theme_counts(analytics_filters)
-    frame = frame[frame["theme"] != "sem_reclamacao"]  # não é uma reclamação
-    counts = [(row.theme, THEME_LABELS[row.theme], int(row.reviews), float(row.share)) for row in frame.itertuples()]
-    return ThemeStats(total, counts, describe_filters(filters))
+    frame = source.theme_counts(analytics_filters)
+    frame = frame[~frame["theme"].isin(SCOPES[kind]["not_counted"])]
+    counts = [(row.theme, row.label, int(row.reviews), float(row.share)) for row in frame.itertuples()]
+    return ThemeStats(total, counts, describe_filters(filters), kind)
 
 
 PERCENT = re.compile(r"\d+(?:[.,]\d+)?\s?%")
@@ -234,9 +263,9 @@ PROMPT = ChatPromptTemplate.from_messages([("system", SYSTEM_PROMPT), ("human", 
 def frequency_note(question: str, stats: ThemeStats | None) -> str:
     if not asks_for_frequency(question):
         return ""
-    if stats is None:  # sem contagem aplicável (por exemplo, perguntas sobre elogios)
+    if stats is None:  # sem contagem aplicável (por exemplo, perguntas sem um lado definido)
         return f"{FREQUENCY_NOTE}\n\n"
-    return f"{FREQUENCY_STATS_NOTE}\n\n{stats.as_text()}\n\n"
+    return f"{FREQUENCY_STATS_NOTE.format(reviews=stats.reviews)}\n\n{stats.as_text()}\n\n"
 
 
 def prompt_inputs(question: str, retrieval: RetrievalResult, stats: ThemeStats | None = None) -> dict:
@@ -318,11 +347,12 @@ def theme_examples(analytics: ThemeAnalytics, retriever: ReviewRetriever, stats:
     São relevantes por construção (foram classificadas no tema), mas não foram escolhidas por
     semelhança com a pergunta: a marca ``theme_example`` mostra isso na interface.
     """
-    themes = [theme for theme, *_ in stats.counts if theme != "outro"][:THEMES_FOR_EXAMPLES]
+    themes = [theme for theme, *_ in stats.counts if theme not in SCOPES[stats.kind]["no_examples"]][:THEMES_FOR_EXAMPLES]
+    labels = {theme: label for theme, label, *_ in stats.counts}
     per_theme = -(-k // len(themes)) if themes else 0
     picked: list[tuple[str, str]] = []
     for theme in themes:
-        rows = analytics.examples(theme, to_analytics_filters(filters), limit=per_theme)
+        rows = analytics.examples(theme, to_analytics_filters(filters, stats.kind), limit=per_theme)
         picked += [(review_id, theme) for review_id in rows["review_id"] if review_id not in dict(picked)]
     picked = picked[:k]
     if not picked:
@@ -330,21 +360,24 @@ def theme_examples(analytics: ThemeAnalytics, retriever: ReviewRetriever, stats:
     stored = retriever.vector_store.get(ids=[review_id for review_id, _ in picked], include=["documents", "metadatas"])
     by_id = {review_id: (text, meta) for review_id, text, meta in zip(stored["ids"], stored["documents"], stored["metadatas"])}
     return [
-        Evidence(review_id, by_id[review_id][0], 0.0, {**by_id[review_id][1], "theme_example": THEME_LABELS[theme]})
+        Evidence(review_id, by_id[review_id][0], 0.0, {**by_id[review_id][1], "theme_example": labels[theme]})
         for review_id, theme in picked if review_id in by_id
     ]
 
 
-def build_chain(retriever: ReviewRetriever, llm: Runnable, analytics: ThemeAnalytics | None = None) -> Runnable:
+def build_chain(retriever: ReviewRetriever, llm: Runnable, analytics: ThemeAnalytics | None = None,
+                praise: ThemeAnalytics | None = None) -> Runnable:
     """Monta a cadeia LCEL. Entrada: ``{question, k, filters, infer_filters}``; saída: ``RagResponse``.
 
-    Com ``analytics``, as perguntas de frequência sobre reclamações recebem a contagem real dos temas.
+    Com ``analytics``, as perguntas de frequência sobre reclamações recebem a contagem real dos temas;
+    com ``praise``, as perguntas de frequência sobre elogios recebem a contagem dos elogios.
     """
+    sources = {"reclamacoes": analytics, "elogios": praise}
 
     def stats(state: dict) -> ThemeStats | None:
-        if analytics is None or not asks_for_frequency(state["question"]):
+        if not asks_for_frequency(state["question"]):
             return None
-        return theme_stats_for(analytics, state["retrieval"].filters)
+        return theme_stats_for(analytics, state["retrieval"].filters, praise)
 
     retrieve = RunnablePassthrough.assign(
         retrieval=RunnableLambda(lambda state: retriever.search(
@@ -356,7 +389,7 @@ def build_chain(retriever: ReviewRetriever, llm: Runnable, analytics: ThemeAnaly
         retrieval, theme_stats = state["retrieval"], state["theme_stats"]
         if retrieval.has_evidence or theme_stats is None:
             return retrieval
-        examples = theme_examples(analytics, retriever, theme_stats, retrieval.filters, state["k"])
+        examples = theme_examples(sources[theme_stats.kind], retriever, theme_stats, retrieval.filters, state["k"])
         return replace(retrieval, evidences=examples)
 
     generate = (
@@ -380,11 +413,13 @@ def build_chain(retriever: ReviewRetriever, llm: Runnable, analytics: ThemeAnaly
 class RagPipeline:
     """Atalho para usar a cadeia com argumentos nomeados. A cadeia fica exposta em ``chain``."""
 
-    def __init__(self, retriever: ReviewRetriever, llm: Runnable, analytics: ThemeAnalytics | None = None):
+    def __init__(self, retriever: ReviewRetriever, llm: Runnable, analytics: ThemeAnalytics | None = None,
+                 praise: ThemeAnalytics | None = None):
         self.retriever = retriever
         self.llm = llm
         self.analytics = analytics
-        self.chain = build_chain(retriever, llm, analytics)
+        self.praise = praise
+        self.chain = build_chain(retriever, llm, analytics, praise)
 
     def ask(
         self,
