@@ -1052,6 +1052,13 @@ Com 42 mil avaliações e poucas pessoas usando ao mesmo tempo, o desempenho atu
 | Chamadas ao LLM | Uma por pergunta, em sequência, cerca de 1,8 s cada | Chamadas em paralelo (`ainvoke`, `abatch`), cache de perguntas repetidas e atenção ao limite de requisições da conta |
 | Interface | Um único processo do Streamlit | Separar a interface de uma API de perguntas, com várias instâncias |
 
+**Cache de perguntas: exato, e não semântico.** O cache previsto na tabela guarda a resposta pela pergunta exata, junto com os filtros, porque os filtros mudam a resposta. Um cache semântico, que reaproveita a resposta de uma pergunta anterior de significado parecido comparando os embeddings, foi considerado e descartado por dois motivos medidos neste projeto:
+
+- **Não há um corte seguro para dizer que duas perguntas são iguais.** As similaridades do E5 ficam numa faixa estreita: perguntas sem relação nenhuma com as avaliações chegam a 0,80–0,85 (Achados 2 e 3).
+- **O embedding confunde elogio com reclamação** (Achado 1). "O que os clientes elogiam na entrega?" e "O que os clientes reclamam da entrega?" ficam próximas, e o cache devolveria a resposta de uma para a outra. O mesmo vale para perguntas que mudam só a categoria ou o ano.
+
+O ganho também seria pequeno: cada pergunta custa uma fração de centavo e leva cerca de 1,8 s. Num sistema construído para não responder sem base, o risco de entregar a resposta de outra pergunta não compensa essa economia.
+
 ### Próximos passos (fase 2)
 
 1. **Busca híbrida.** Combinar o E5 com o BM25, que casa termos exatos e raros (nomes de produto, marcas), onde o embedding é mais fraco (Achado 1).
