@@ -22,6 +22,12 @@ Decisões:
 - **O pipeline recebe um ``Runnable``**, e não um cliente específico: trocar a OpenAI por outro
   provedor (o Claude, por exemplo, pelo ``ChatAnthropic``) é trocar o componente montado aqui. Nos
   testes, o mesmo lugar recebe um LLM falso, sem custo.
+- **Limite de requisições (erro 429) tratado com novas tentativas, sem modelo reserva.** O SDK da
+  OpenAI repete a chamada sozinho (2 vezes por padrão, com espera crescente) em erros de limite, de
+  tempo esgotado e de servidor. Não adotamos um *fallback* para outro modelo (``with_fallbacks`` do
+  LangChain): a resposta viria de um modelo que não passou pela avaliação, e o modelo reserva da mesma
+  conta cairia junto numa falta de crédito ou numa queda da OpenAI. Se as tentativas se esgotam, a
+  pergunta termina em erro e pode ser repetida.
 """
 
 from __future__ import annotations
