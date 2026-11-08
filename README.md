@@ -65,7 +65,7 @@ cd tech-challenge-fase4
 
 # 2. Criar e ativar o ambiente virtual
 python -m venv .venv
-.venv\Scripts\activate            # Windows (PowerShell)
+.venv\Scripts\activate            # Windows (PowerShell ou CMD)
 source .venv/bin/activate         # Linux/macOS
 
 # 3. Instalar as dependências (alguns minutos: inclui o PyTorch)
@@ -972,7 +972,7 @@ A interface em Streamlit ([app.py](app.py)) é o ponto de entrada para gestores 
 streamlit run app.py
 ```
 
-Ela requer o índice (`python scripts/build_index.py`) e a chave no `.env`. Um seletor no topo alterna entre duas visões: **Perguntar**, descrita abaixo, e **Panorama**, com a frequência de cada tema das reclamações (ver [As contagens no sistema](#as-contagens-no-sistema)). A visão Perguntar tem três partes:
+Ela requer o índice (`python scripts/build_index.py`) e a chave no `.env`. Um seletor no topo alterna entre duas visões: **Perguntar**, descrita abaixo, e **Panorama**, com a frequência de cada tema das reclamações e dos elogios (ver [As contagens no sistema](#as-contagens-no-sistema) e [Frequência dos elogios](#frequência-dos-elogios)). A visão Perguntar tem três partes:
 
 1. **Pergunta.** Campo livre e seis perguntas de exemplo em botões, com rótulos curtos. Cinco delas vêm do enunciado do desafio ("Quais são os principais problemas relatados pelos clientes?", "Quais reclamações relacionadas à entrega aparecem com maior frequência?" etc.), e a sexta, "Qual a capital da França?", demonstra a recusa.
 2. **Resposta e evidências.** A resposta com as citações [n] e, abaixo, um cartão para cada avaliação citada: nota em estrelas, categoria, status e dias de atraso da entrega, data, número mínimo de cópias do mesmo texto, texto original e `review_id`. Quando a pergunta é recusada, a tela informa em qual barreira isso aconteceu.
@@ -998,10 +998,10 @@ Ela requer o índice (`python scripts/build_index.py`) e a chave no `.env`. Um s
 | O que a tela mostra | O que existe na base |
 | --- | --- |
 | "ao menos 98 avaliações com este mesmo texto" (cópias de "não recebi o produto" encontradas pela busca) | 107 avaliações com exatamente esse texto |
-| | 2.127 avaliações que falam em não recebimento com outras palavras ("ainda não recebi meu pedido"...), 19,6% das 10.861 negativas |
+| | 3.476 avaliações classificadas como não recebimento, contando as que usam outras palavras ("ainda não recebi meu pedido"...): 32,1% das 10.836 negativas (ver [Frequência por tema](#frequência-por-tema)) |
 | "Evidências usadas na resposta (8)" | Depende do limite de evidências na barra lateral, e não do assunto |
 
-A busca conta só as cópias exatas que caíram na janela de candidatos, e o número de evidências é uma configuração. Para que nada disso seja lido como frequência, a tela escreve "ao menos N", explica abaixo do título das evidências o que o número significa e repete esse exemplo no aviso das perguntas de frequência. O dado de negócio ("19,6% das reclamações falam de não recebimento") exige contar sobre a base inteira.
+A busca conta só as cópias exatas que caíram na janela de candidatos, e o número de evidências é uma configuração. Para que nada disso seja lido como frequência, a tela escreve "ao menos N", explica abaixo do título das evidências o que o número significa e repete esse exemplo no aviso das perguntas de frequência. O dado de negócio ("32,1% das reclamações falam de não recebimento") exige contar sobre a base inteira.
 
 **Modelo e índice carregados uma vez.** O modelo de embeddings (1,1 GB) e o índice ficam em cache durante a sessão (`st.cache_resource`). Só a primeira pergunta espera o carregamento. Os metadados para os filtros são lidos do índice em lotes de 5.000, porque pedir as 42 mil avaliações de uma vez estoura o limite de variáveis do SQLite que o Chroma usa internamente.
 
