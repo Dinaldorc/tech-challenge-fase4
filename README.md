@@ -1086,4 +1086,4 @@ A base é publicada pela Olist sob [CC BY-NC-SA 4.0](https://creativecommons.org
 
 **Grupo:** 128  
 **Data:** 11/2026  
-**Atualizado em:** 06/11/2026
+**Atualizado em:** 12/11/2026
