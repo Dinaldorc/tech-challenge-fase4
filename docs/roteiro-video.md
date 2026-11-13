@@ -9,11 +9,11 @@ Na ordem de apresentação do grupo, com cerca de 1 min 40 s para cada um:
 | Ordem | Quem | Trechos | Tempo | Assunto |
 | --- | --- | --- | --- | --- |
 | 1 | Luís Gustavo | 1 e 2 | 0:00 a 1:40 | O problema e a arquitetura |
-| 2 | Dinaldo | 3 e 4 | 1:40 a 3:40 | Como a recuperação funciona e a primeira demonstração |
+| 2 | Bruno | 3 e 4 | 1:40 a 3:40 | Como a recuperação funciona e a primeira demonstração |
 | 3 | Afonso | 5 e 6 | 3:40 a 5:30 | Frequência de reclamações e elogios, e as recusas |
-| 4 | Bruno | 7 e 8 | 5:30 a 6:50 | Desafios, decisões técnicas e fechamento |
+| 4 | Dinaldo | 7 e 8 | 5:30 a 6:50 | Desafios, decisões técnicas e fechamento |
 
-Nas demonstrações (trechos 4 a 6), uma pessoa só pode cuidar da tela enquanto Dinaldo e Afonso narram, para a tela não ficar parada nas trocas.
+Nas demonstrações (trechos 4 a 6), uma pessoa só pode cuidar da tela enquanto Bruno e Afonso narram, para a tela não ficar parada nas trocas.
 
 ## O que o enunciado pede, e onde aparece
 
@@ -21,12 +21,12 @@ Nas demonstrações (trechos 4 a 6), uma pessoa só pode cuidar da tela enquanto
 | --- | --- |
 | O problema de negócio abordado | 1 (Luís Gustavo) |
 | A arquitetura proposta | 2 (Luís Gustavo) |
-| A estratégia utilizada para construir o pipeline RAG | 2 e 3 (Luís Gustavo e Dinaldo) |
-| Como ocorre a recuperação das avaliações relevantes | 3 e 4 (Dinaldo) |
-| Uma demonstração prática da solução | 4, 5 e 6 (Dinaldo e Afonso) |
-| Exemplos de perguntas realizadas | 4, 5 e 6 (Dinaldo e Afonso) |
-| As evidências recuperadas para fundamentar as respostas | 4 e 5 (Dinaldo e Afonso) |
-| Os principais desafios e decisões técnicas da equipe | 7 (Bruno) |
+| A estratégia utilizada para construir o pipeline RAG | 2 e 3 (Luís Gustavo e Bruno) |
+| Como ocorre a recuperação das avaliações relevantes | 3 e 4 (Bruno) |
+| Uma demonstração prática da solução | 4, 5 e 6 (Bruno e Afonso) |
+| Exemplos de perguntas realizadas | 4, 5 e 6 (Bruno e Afonso) |
+| As evidências recuperadas para fundamentar as respostas | 4 e 5 (Bruno e Afonso) |
+| Os principais desafios e decisões técnicas da equipe | 7 (Dinaldo) |
 
 ## Antes de gravar
 
@@ -54,13 +54,13 @@ Nas demonstrações (trechos 4 a 6), uma pessoa só pode cuidar da tela enquanto
 >
 > O segundo fluxo responde às perguntas. A pergunta vira embedding, a busca recupera as avaliações mais parecidas dentro dos filtros, o contexto é montado com as avaliações numeradas, e o modelo `gpt-4.1-mini` gera a resposta. Tudo isso é uma cadeia do LangChain. E há três barreiras contra respostas sem base: o corte de similaridade da busca, o julgamento do próprio modelo e a conferência automática das citações.
 
-## Trecho 3 — Como a recuperação funciona (1:40 a 2:30) · Dinaldo
+## Trecho 3 — Como a recuperação funciona (1:40 a 2:30) · Bruno
 
 **Tela:** o README, na seção "Achado 1", na tabela com as quatro buscas.
 
 > Um achado da construção definiu a recuperação. Para a pergunta "entrega atrasada, não chegou no prazo", a busca por significado acertava o assunto, mas trazia elogios como "entregue no prazo": só 2 dos 10 primeiros resultados eram reclamações. O embedding entende o tema, mas não a polaridade. Testamos contra o BM25, a busca por palavras, e ele errava do mesmo jeito. A solução não foi trocar a técnica, foi usar a nota que o próprio cliente deu: com o filtro de sentimento, 10 de 10 resultados passam a ser reclamações. Por isso, quando a pergunta pede reclamações ou elogios, o sentimento é inferido e vira filtro. Além disso, comentários repetidos são agrupados, e o corte de similaridade foi calibrado com 82 perguntas, dentro e fora do tema.
 
-## Trecho 4 — Demonstração: uma pergunta e suas evidências (2:30 a 3:40) · Dinaldo
+## Trecho 4 — Demonstração: uma pergunta e suas evidências (2:30 a 3:40) · Bruno
 
 **Tela:** o app, na visão Perguntar. Clique no exemplo **"Problemas de entrega"**.
 
@@ -98,7 +98,7 @@ Nas demonstrações (trechos 4 a 6), uma pessoa só pode cuidar da tela enquanto
 
 > Esta é mais difícil: uma avaliação diz "quero trocá-lo, como fazer?", então ela passa pela busca. Mas o modelo percebe que o comentário fala de trocar um produto, e não de óleo de carro, e recusa. Na avaliação, o sistema recusou as 36 perguntas fora do tema que testamos.
 
-## Trecho 7 — Desafios e decisões técnicas (5:30 a 6:35) · Bruno
+## Trecho 7 — Desafios e decisões técnicas (5:30 a 6:35) · Dinaldo
 
 **Tela:** o `docs/processo.md` no GitHub, na tabela "Descobertas que mudaram o rumo".
 
@@ -106,7 +106,7 @@ Nas demonstrações (trechos 4 a 6), uma pessoa só pode cuidar da tela enquanto
 >
 > Na avaliação final, com 95 perguntas, o sistema respondeu 55 das 56 legítimas, recusou todas as fora do tema, não inventou nenhuma citação e não obedeceu a uma instrução maliciosa escondida num comentário.
 
-## Trecho 8 — Fechamento (6:35 a 6:50) · Bruno
+## Trecho 8 — Fechamento (6:35 a 6:50) · Dinaldo
 
 **Tela:** o README no topo, ou o Panorama.
 
