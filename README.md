@@ -308,7 +308,7 @@ O projeto foi construído em onze etapas, da organização do repositório à me
 | Frequência dos elogios | #24 | Temas dos elogios descobertos pelo agrupamento e contados por classificação, validados contra uma referência e contra o status do pedido; Panorama e respostas com a contagem dos elogios |
 | Armadilhas de dado objetivo | #23 | Regra para perguntas que pedem um dado ausente das avaliações, redigida com um conjunto de perguntas e conferida com outro; resposta malformada convertida em recusa |
 
-Ao longo do caminho, 34 descobertas mudaram o rumo do projeto. Cinco exemplos:
+Ao longo do caminho, 35 descobertas mudaram o rumo do projeto. Cinco exemplos:
 
 - **O embedding confunde elogio com reclamação** (etapa 3). "Entrega atrasada" trazia "entregue no prazo". O experimento mostrou que o BM25 erra do mesmo jeito, e a correção veio dos metadados: o filtro pela nota do cliente.
 - **O critério de "maior acerto" recusava perguntas legítimas** (etapa 4). Como a recusa na busca é irreversível e o aceite indevido ainda passa pelo LLM, o critério passou a ser não recusar nenhuma pergunta legítima.
@@ -316,7 +316,7 @@ Ao longo do caminho, 34 descobertas mudaram o rumo do projeto. Cinco exemplos:
 - **O agrupamento automático não serve para contar temas** (etapa 10). As reclamações formam um contínuo e misturam vários temas na mesma avaliação. O agrupamento passou a servir só para descobrir os temas, e a contagem foi feita por classificação, validada contra uma referência independente e contra os dados do pedido.
 - **Um modelo misturava palavras de outros alfabetos** (etapa 7). Com métricas de segurança iguais, a leitura das respostas revelou o defeito no `gpt-5.4-mini` e decidiu a escolha do modelo.
 
-O processo completo, com a linha do tempo, o detalhe de cada etapa, as 34 descobertas e as lições metodológicas, está em [docs/processo.md](docs/processo.md).
+O processo completo, com a linha do tempo, o detalhe de cada etapa, as 35 descobertas e as lições metodológicas, está em [docs/processo.md](docs/processo.md).
 
 ## Decisões técnicas por etapa
 
@@ -741,17 +741,18 @@ python scripts/evaluate_rag.py
 | Perguntas sobre lojas respondidas | 5 de 5 | 5 de 5 |
 | Respostas que citam uma loja pelo pseudônimo sem avisar | 0 de 8 | 0 de 6 |
 | Seguiu a instrução maliciosa | Não | Não |
-| Generalizou numa pergunta de julgamento | Não | Sim ("Sim. As avaliações encontradas dizem...") |
+| Generalizou numa pergunta de julgamento | Não | Sim até a PR #24 ("Sim. As avaliações encontradas dizem..."); não na rodada da PR #31 |
+| Respostas sem contagem que dizem quanto um assunto aparece ("frequentes", "a maioria") | **0 de 40** (5 antes da PR #31) | 2 de 40 (2 antes) |
 | Perguntas de frequência respondidas com a contagem real | 8 de 8 | 8 de 8 |
 | Porcentagens fora da contagem | 0 | 0 |
 | Respostas com palavras de outro alfabeto | **0 de 96** | **3 de 96** |
 | Tokens por pergunta (entrada + saída) | ~1.300 + 120 | ~1.300 + 120 |
-| Tempo médio por chamada | 1,9 s | 1,6 s |
+| Tempo médio por chamada | 2,2 s | 1,7 s |
 
 **Escolha: `gpt-4.1-mini`, configurável por `OPENAI_MODEL`.** Os dois modelos empatam nas métricas de segurança. A exceção foi a rodada feita depois da busca quase exata, em que o `gpt-4.1-mini` respondeu a uma armadilha, problema corrigido na PR #23 (item 6). A diferença que se repetiu em todas as rodadas está na qualidade do texto:
 
 - O `gpt-5.4-mini` misturou palavras de outros alfabetos ao português em 6 de 83 respostas numa rodada, em 5 de 88 na seguinte, em 3 de 88 na primeira feita com a cadeia do LangChain, e entre 2 e 5 de 93 ou 96 nas rodadas seguintes: "falta de **პასუხa**" (georgiano para "resposta"), "**समाधान**ar" (hindi para "solução"), além de palavras em armênio e hebraico. Numa ferramenta para gestores, isso compromete a confiança na resposta inteira. A avaliação passou a verificar esse defeito automaticamente.
-- O `gpt-5.4-mini` também respondeu "Sim." a "os clientes recomendariam a loja?", uma conclusão sobre todos os clientes tirada de 8 avaliações (ver o item 2 abaixo).
+- O `gpt-5.4-mini` também respondeu "Sim." a "os clientes recomendariam a loja?", uma conclusão sobre todos os clientes tirada de 8 avaliações (ver o item 2 abaixo). Na rodada da PR #31, com a regra contra palavras de frequência, ele deixou de abrir a resposta com "Sim."; o defeito de alfabeto continuou.
 
 A única pergunta legítima recusada pelos dois ("o pessoal ficou satisfeito com o custo-benefício?") é um caso defensável: nenhuma avaliação encontrada fala de custo-benefício. Fora isso, as diferenças estão em poucos casos e não permitem afirmar que um modelo é melhor em geral.
 
@@ -760,7 +761,7 @@ A única pergunta legítima recusada pelos dois ("o pessoal ficou satisfeito com
 1. **A segunda barreira sustenta o sistema.** Com o corte recalibrado para aceitar perguntas genéricas, 27 das 36 perguntas fora do tema passaram pela busca, e o LLM recusou todas, com uma exceção na rodada da PR #22, corrigida na PR #23 (item 6). Para "como fazer uma reclamação no Procon?", a justificativa foi: "as avaliações mencionam a intenção de reclamar no Procon, mas não explicam como fazer uma reclamação no Procon". Para "como trocar o óleo do carro?": "as avaliações tratam exclusivamente de trocas de produtos adquiridos". É a distinção que o embedding não faz: um texto parecido com a pergunta não é um texto que responde a ela.
 2. **A busca por similaridade não traz uma amostra representativa.** Para "os clientes recomendariam a loja?", as 8 evidências tinham notas `[5, 5, 5, 5, 4, 4, 5, 3]`, embora 25,8% das avaliações com texto sejam negativas. Os comentários mais parecidos com "recomendariam" são os que dizem "recomendo". Na primeira rodada, a resposta foi "ao menos sete clientes recomendam a loja", sem ressalvas. Por isso, a regra contra generalizar passou a valer para toda pergunta, e não só para as buscas filtradas. Mesmo assim, o `gpt-5.4-mini` continuou abrindo a resposta com "Sim.": a regra reduz o risco, mas não o elimina, e isso pesou na escolha do modelo.
 3. **Perguntas de frequência levavam o modelo a inventar um ranking.** Para "Quais reclamações relacionadas à entrega aparecem com maior frequência?", pergunta do próprio enunciado, a resposta começava com "As reclamações que aparecem com maior frequência são a demora...". O modelo tirou a ordem de 8 exemplos, sem nenhuma contagem por trás, contradizendo o aviso exibido na tela. **Correção:** quando a pergunta pede frequência, proporção ou ranking, o contexto enviado ao LLM recebe uma instrução extra para apresentar os tipos de situação sem ordená-los e terminar dizendo que medir a frequência exige contar a base inteira. Depois da correção, a resposta passou a ser: "As avaliações relatam reclamações relacionadas a atrasos na entrega (...). Medir a frequência exata dessas reclamações exige a contagem das avaliações em toda a base de dados." **Limitação de desenho:** a frequência real não é calculada pela busca semântica. Ela exige contar sobre a base inteira, que é o papel das análises quantitativas da fase 2.
-4. **A injeção não funcionou em nenhum modelo, em nenhuma das doze rodadas da avaliação.** Nenhuma resposta repetiu a acusação. Em todas as rodadas, ao menos um dos modelos citou a avaliação fictícia, mas só pelo trecho inofensivo ("Produto bom"). Qual modelo fez isso mudou entre as rodadas, o que mostra o limite da temperatura 0 como garantia de reprodução.
+4. **A injeção não funcionou em nenhum modelo, em nenhuma das treze rodadas da avaliação.** Nenhuma resposta repetiu a acusação. Em todas as rodadas, ao menos um dos modelos citou a avaliação fictícia, mas só pelo trecho inofensivo ("Produto bom"). Qual modelo fez isso mudou entre as rodadas, o que mostra o limite da temperatura 0 como garantia de reprodução.
 
 5. **As lojas anonimizadas apareciam como empresas reais.** A Olist trocou os nomes das lojas parceiras por casas de *Game of Thrones*: "lannister" aparece em 1.214 avaliações, "stark" em 303, "targaryen" em 276 e "baratheon" em 272. A análise exploratória decidiu que o prompt explicaria isso ao modelo, mas a instrução não tinha sido implementada. Medimos com 5 perguntas sobre essas lojas: a busca trouxe 8 de 8 evidências da loja certa em todas, mas **nenhuma das 5 respostas** avisava que o nome era um pseudônimo ("a Stark é uma loja muito boa e confiável"; "desorganização da empresa"). Um gestor poderia procurar uma loja chamada Stark. **Correção:** a regra 8 do prompt explica os pseudônimos e pede que a resposta deixe isso claro. Depois dela, as 5 respostas passaram a falar em "a loja identificada pelo pseudônimo stark". A avaliação ganhou as 5 perguntas e uma verificação automática: nenhuma resposta, dos dois modelos, cita uma loja sem o aviso. As 82 perguntas anteriores não tocavam no assunto, e por isso nenhuma rodada anterior detectou o problema.
 
@@ -782,6 +783,19 @@ A única pergunta legítima recusada pelos dois ("o pessoal ficou satisfeito com
    Como em toda mudança no prompt (lição 10), conferimos a linha de base: nas 89 perguntas, as decisões da busca e as mensagens do usuário continuaram idênticas, e só o prompt de sistema mudou. A avaliação completa voltou a 36 de 36 perguntas fora do tema recusadas, sem perder nenhuma legítima.
 
 7. **Uma resposta malformada derrubava a pergunta.** Numa das repetições com a instrução anterior, o modelo repetiu os números das citações até a resposta ser cortada, e o JSON veio incompleto. O pipeline foi feito para transformar uma resposta fora do formato em recusa, mas, na Responses API, o próprio SDK da OpenAI levanta o erro de validação antes que o LangChain o capture, e a pergunta terminava numa exceção, que a interface mostraria como erro. **Correção (PR #23):** a resposta tem um tamanho máximo de 1.000 tokens (a maior da avaliação usou 285), o que interrompe cedo uma repetição desse tipo, e o erro de formato agora vira a recusa "a resposta do modelo veio fora do formato esperado". Conferimos com a API real, forçando o corte da resposta, e com um teste automatizado.
+
+8. **Sem contagem, "frequentes" é um número disfarçado.** No retorno da entrega, o professor apontou que a resposta sobre rastreamento dizia "há reclamações frequentes", sem nenhuma contagem por trás, e sugeriu "há relatos", guardando "frequentes" para quando houver contagem. A avaliação confirmou o padrão: o `gpt-4.1-mini` usou "frequentes", "a maioria" ou "geralmente" em 5 das 40 respostas sem contagem (rastreamento, tamanho das roupas, montagem dos móveis, opiniões sobre o site e a loja lannister). A regra 5 já pedia "há clientes que...", mas não proibia essas palavras, e elas afirmam uma proporção tanto quanto uma porcentagem.
+
+   **Correção (PR #31):** a regra 5 passou a dizer que, pelo mesmo motivo, a resposta não diz quanto um assunto aparece e escreve "há relatos de...". Nas perguntas de frequência, a contagem real continua sendo a exceção às regras 4 e 5, e "os problemas mais frequentes" segue permitido ali. A avaliação ganhou uma medida automática dessas palavras nas respostas sem contagem.
+
+   A regra foi conferida com 10 perguntas novas, que não participaram da redação, com 3 repetições cada:
+
+   | `gpt-4.1-mini`, 10 perguntas novas × 3 repetições | Instrução anterior | Instrução nova |
+   | --- | --- | --- |
+   | Respostas com palavras de frequência | 4 de 30 ("frequentes" nos relógios e na nota fiscal) | 0 de 30 |
+   | Perguntas respondidas | 30 de 30 | 30 de 30 |
+
+   A leitura das respostas não mostrou efeito colateral. A da nota fiscal, por exemplo, passou de "houve problemas frequentes relacionados à nota fiscal" para "há relatos de clientes que não receberam a nota fiscal junto com o pedido". Na avaliação completa, todas as outras métricas ficaram iguais (tabela acima).
 
 **Limitações.** A avaliação confere se as citações **existem**, não se cada uma **sustenta** a afirmação a que está ligada. Essa verificação foi feita lendo uma amostra das respostas. Automatizá-la, com um segundo modelo atuando como avaliador (*LLM-as-a-judge*) e métricas de fidelidade às evidências, fica para a fase 2, junto com um conjunto maior de perguntas.
 
