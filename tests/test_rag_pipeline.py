@@ -16,6 +16,7 @@ from src.rag_pipeline import (
     check_numbers,
     format_evidence,
     is_complaint_scope,
+    no_match_reason,
     scope_of,
     search_refusal_reason,
     theme_stats_for,
@@ -330,6 +331,32 @@ def test_without_evidence_a_frequency_question_uses_theme_examples(analytics):
     assert all(e.metadata.get("theme_example") for e in response.retrieval.evidences)
     regular = RagPipeline(StubRetriever([]), FakeLLM(answer("x [1]", [1])), analytics).ask("Quais os problemas?")
     assert regular.refused_at == "busca"  # sem pedido de frequência, a recusa na busca continua
+
+
+def test_filters_that_match_nothing_are_refused_without_the_general_count(analytics):
+    # Sentimento negativo com nota 5: nenhuma avaliação atende. Antes, a contagem descartava a nota 5,
+    # contava todas as negativas e a pergunta era respondida com exemplos dos temas.
+    contradictory = SearchFilters(sentiments=("negativo",), review_scores=(5,))
+    assert theme_stats_for(analytics, contradictory) is None
+    assert theme_stats_for(analytics, SearchFilters(sentiments=("negativo",), review_scores=(2, 5))).total == 1  # só a nota 2 conta
+
+    retriever = StubRetriever([], filters=contradictory)
+    retriever.result = RetrievalResult("pergunta", contradictory, 0.84, [], None)
+    retriever.vector_store = FakeVectorStore()
+    llm = FakeLLM(answer("Atraso em 50,0% [1].", [1]))
+    response = RagPipeline(retriever, llm, analytics).ask("Quais os problemas mais comuns?")
+    assert response.refused_at == "busca" and llm.prompts == []
+    assert response.refusal_reason == (
+        "Nenhuma avaliação atende aos filtros escolhidos (sentimento: negativo; notas: 5). "
+        "A nota escolhida não combina com o sentimento (negativo: notas 1 e 2)."
+    )
+
+
+def test_no_match_reason_without_contradiction_only_lists_the_filters():
+    assert no_match_reason(SearchFilters(categories=("x",))) == (
+        "Nenhuma avaliação atende aos filtros escolhidos (categorias: x)."
+    )
+    assert no_match_reason(SearchFilters(sentiments=("negativo",), review_scores=(1,))).endswith("notas: 1).")
 
 
 @pytest.fixture()
