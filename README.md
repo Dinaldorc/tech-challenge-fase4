@@ -308,7 +308,7 @@ O projeto foi construído em onze etapas, da organização do repositório à me
 | Frequência dos elogios | #24 | Temas dos elogios descobertos pelo agrupamento e contados por classificação, validados contra uma referência e contra o status do pedido; Panorama e respostas com a contagem dos elogios |
 | Armadilhas de dado objetivo | #23 | Regra para perguntas que pedem um dado ausente das avaliações, redigida com um conjunto de perguntas e conferida com outro; resposta malformada convertida em recusa |
 
-Ao longo do caminho, 33 descobertas mudaram o rumo do projeto. Cinco exemplos:
+Ao longo do caminho, 34 descobertas mudaram o rumo do projeto. Cinco exemplos:
 
 - **O embedding confunde elogio com reclamação** (etapa 3). "Entrega atrasada" trazia "entregue no prazo". O experimento mostrou que o BM25 erra do mesmo jeito, e a correção veio dos metadados: o filtro pela nota do cliente.
 - **O critério de "maior acerto" recusava perguntas legítimas** (etapa 4). Como a recusa na busca é irreversível e o aceite indevido ainda passa pelo LLM, o critério passou a ser não recusar nenhuma pergunta legítima.
@@ -316,7 +316,7 @@ Ao longo do caminho, 33 descobertas mudaram o rumo do projeto. Cinco exemplos:
 - **O agrupamento automático não serve para contar temas** (etapa 10). As reclamações formam um contínuo e misturam vários temas na mesma avaliação. O agrupamento passou a servir só para descobrir os temas, e a contagem foi feita por classificação, validada contra uma referência independente e contra os dados do pedido.
 - **Um modelo misturava palavras de outros alfabetos** (etapa 7). Com métricas de segurança iguais, a leitura das respostas revelou o defeito no `gpt-5.4-mini` e decidiu a escolha do modelo.
 
-O processo completo, com a linha do tempo, o detalhe de cada etapa, as 33 descobertas e as lições metodológicas, está em [docs/processo.md](docs/processo.md).
+O processo completo, com a linha do tempo, o detalhe de cada etapa, as 34 descobertas e as lições metodológicas, está em [docs/processo.md](docs/processo.md).
 
 ## Decisões técnicas por etapa
 
@@ -883,6 +883,8 @@ A contagem por tema chega ao usuário por dois caminhos.
 **Quais perguntas recebem a contagem.** A conferência contra o enunciado mostrou que as perguntas de frequência nem sempre usam a palavra "frequência". O enunciado pergunta "quais são os **principais** problemas?" e "o que os clientes **mais elogiam**?", e essas formas não eram reconhecidas: a primeira recebia exemplos sem números, e a segunda era respondida com um ranking tirado de 8 avaliações ("os clientes mais elogiam a entrega no prazo..."). O detector passou a reconhecer também "principal" ou "principais" e "mais" seguido de um verbo de avaliação (elogiam, valorizam, reclamam, citam, mencionam, apontam). A linha de base confirmou que só as 10 perguntas com essas palavras mudaram de comportamento. Com isso, 13 perguntas da avaliação passaram a receber a contagem real, sem nenhuma porcentagem fora dela, e as de elogio passaram a descrever os exemplos sem ranquear.
 
 Se a busca não encontra nenhuma avaliação acima do corte numa pergunta de frequência de reclamações ("Quais os problemas mais comuns?", na categoria móveis, por exemplo), a pergunta não é mais recusada: a contagem responde a ela, e as evidências passam a ser **exemplos dos temas mais frequentes**, escolhidos pela classificação. A tela indica que esses exemplos não vieram da busca por similaridade. O mesmo vale para as perguntas de frequência sobre elogios, com os exemplos dos elogios mais frequentes.
+
+**Quando nenhuma avaliação atende aos filtros, a pergunta é recusada.** O retorno do professor encontrou um caso em que essa troca não deveria acontecer: com sentimento negativo e nota 5 juntos, a busca voltava vazia, mas a resposta usava a contagem de todas as 10.836 avaliações negativas. A contagem das reclamações aproveita só as notas 1 e 2; a nota 5 era descartada, a lista de notas ficava vazia e o código a lia como "sem filtro de nota". Agora, quando as notas escolhidas não cabem no lado da contagem, não há contagem, e quando nenhuma avaliação atende aos filtros, não há exemplos. A pergunta é recusada na busca, sem chamar o LLM, com o motivo: "Nenhuma avaliação atende aos filtros escolhidos (sentimento: negativo; notas: 5). A nota escolhida não combina com o sentimento (negativo: notas 1 e 2)." O caso ganhou um teste automático.
 
 **Avaliação.** A avaliação ganhou 5 perguntas de frequência, com formulações e filtros variados ("mais comuns", "quantas", "proporção"; categoria, entrega atrasada). Nos dois modelos, as 5 e a pergunta de frequência do enunciado foram respondidas com a contagem real, sem nenhuma porcentagem fora dela, e as métricas anteriores se mantiveram. Exemplo de resposta, com o filtro de entrega atrasada:
 

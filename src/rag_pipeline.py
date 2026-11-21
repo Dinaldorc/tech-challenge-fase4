@@ -230,6 +230,10 @@ def theme_stats_for(analytics: ThemeAnalytics | None, filters: SearchFilters,
     source = {"reclamacoes": analytics, "elogios": praise}.get(kind) if kind else None
     if source is None:
         return None
+    if filters.review_scores and not set(filters.review_scores) & set(SCOPES[kind]["scores"]):
+        # Ex.: sentimento negativo com nota 5. Nenhuma avaliação atende, e a contagem não pode
+        # descartar as notas escolhidas e contar todas as negativas.
+        return None
     analytics_filters = to_analytics_filters(filters, kind)
     total = source.total(analytics_filters)
     if total == 0:
@@ -292,10 +296,26 @@ def check_citations(answer: str, cited: list[int], total: int) -> tuple[list[int
     return valid, invalid
 
 
+SENTIMENT_SCORES = {"negativo": (1, 2), "neutro": (3,), "positivo": (4, 5)}  # como em score_to_sentiment
+
+
+def no_match_reason(filters: SearchFilters) -> str:
+    """Motivo da recusa quando nenhuma avaliação atende aos filtros, apontando sentimento e nota incompatíveis."""
+    described = describe_filters(filters)
+    reason = "Nenhuma avaliação atende aos filtros escolhidos" + (f" ({described})." if described != "nenhum" else ".")
+    if filters.sentiments and filters.review_scores:
+        allowed = {score for s in filters.sentiments for score in SENTIMENT_SCORES.get(s, ())}
+        if not allowed & set(filters.review_scores):
+            ranges = "; ".join(f"{s}: notas {' e '.join(map(str, SENTIMENT_SCORES[s]))}"
+                               for s in filters.sentiments if s in SENTIMENT_SCORES)
+            reason += f" A nota escolhida não combina com o sentimento ({ranges})."
+    return reason
+
+
 def search_refusal_reason(retrieval: RetrievalResult) -> str:
     cut = f"{retrieval.min_similarity:.3f}".rstrip("0").replace(".", ",")
     if retrieval.best_similarity is None:
-        return "Nenhuma avaliação atende aos filtros escolhidos."
+        return no_match_reason(retrieval.filters)
     best = f"{retrieval.best_similarity:.3f}".replace(".", ",")
     return f"A avaliação mais parecida com a pergunta teve similaridade {best}, abaixo do corte de {cut}."
 
@@ -388,6 +408,8 @@ def build_chain(retriever: ReviewRetriever, llm: Runnable, analytics: ThemeAnaly
         """Sem evidência acima do corte, mas com contagem: usa exemplos dos temas mais frequentes."""
         retrieval, theme_stats = state["retrieval"], state["theme_stats"]
         if retrieval.has_evidence or theme_stats is None:
+            return retrieval
+        if retrieval.best_similarity is None:  # nenhuma avaliação atende aos filtros: não há o que exemplificar
             return retrieval
         examples = theme_examples(sources[theme_stats.kind], retriever, theme_stats, retrieval.filters, state["k"])
         return replace(retrieval, evidences=examples)

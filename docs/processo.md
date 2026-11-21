@@ -31,11 +31,13 @@ flowchart TD
     E12 --> E13["Revisão contra o enunciado<br/>PR #21 e #22"]
     E13 --> E14["Correção: armadilhas de dado objetivo<br/>PR #23"]
     E14 --> E15["Frequência dos elogios<br/>PR #24"]
+    E15 --> E16["Correção: filtros sem avaliações<br/>PR #30"]
     E13 -.->|"'principais' e 'mais elogiam'<br/>passam a ser frequência"| E11
     E5 -.->|"a busca não mede frequência:<br/>contar à parte"| E11
     E13 -.->|"reindexação: a busca aproximada<br/>perdia vizinhos"| E3
     E14 -.->|"evidências melhores:<br/>nova regra de recusa"| E5
     E11 -.->|"mesma técnica:<br/>elogios"| E15
+    E16 -.->|"retorno do professor:<br/>contagem com filtros contraditórios"| E11
 
     E3 -.->|"Achado 1: o embedding confunde<br/>elogio com reclamação"| E4
     E3 -.->|"Achado 2: similaridades<br/>numa faixa estreita"| E4
@@ -76,6 +78,7 @@ As setas contínuas são a ordem das etapas. As tracejadas são as **realimenta�
 | #22 | 06/11/2026 | `feature/data-da-compra` | Revisão contra o enunciado | Período filtrado pela data da compra; base reindexada, busca quase exata (`ef_search` = 10.000) e corte recalibrado (continuou em 0,82) |
 | #23 | 06/11/2026 | `fix/armadilha-correios` | Correção | Regra para perguntas que pedem um dado ausente das avaliações; resposta malformada convertida em recusa |
 | #24 | 06/11/2026 | `feature/temas-elogios` | Frequência por tema | Temas dos elogios descobertos e classificados nas 27.527 avaliações positivas; Panorama e respostas com a contagem dos elogios |
+| #30 | 21/11/2026 | `fix/filtros-sem-avaliacoes` | Correção | Filtros que nenhuma avaliação atende passam a ser recusados na busca, com o motivo, em vez de respondidos com a contagem geral |
 
 ## Etapas
 
@@ -192,6 +195,12 @@ Antes de mudar o prompt, testamos perguntas novas do mesmo tipo, e o problema se
 
 Repetimos o caminho da etapa 10 sobre as avaliações positivas: o agrupamento para descobrir os temas, um piloto de 300 avaliações para medir custo, estabilidade e problemas da instrução, a base inteira e as duas validações (uma referência independente e o status do pedido). O piloto mostrou que o modelo não seguia a regra do tema exclusivo, e a regra passou para o código (descoberta 32). A base inteira revelou as ressalvas nas notas altas (descoberta 33). Antes da avaliação completa, a linha de base confirmou que só as perguntas de frequência sobre elogios mudaram.
 
+### Correção: filtros sem avaliações (PR #30)
+
+**Objetivo:** atender a uma sugestão do professor no retorno da entrega: avisar quando nenhum comentário atende aos filtros, em vez de responder com a contagem geral.
+
+Reproduzimos o caso sem chamar a API, só com a busca e a contagem: sentimento negativo com nota 5 produzia uma contagem de 10.836 avaliações, todas as negativas (descoberta 34). A correção ficou no código, nos dois pontos em que o erro passava, e foi conferida com o índice real e com um LLM falso que falharia se fosse chamado. O prompt não mudou, então as respostas das demais perguntas não mudam.
+
 ## Descobertas que mudaram o rumo
 
 Cada descoberta segue o mesmo formato: como apareceu, a evidência, o que mudou e onde está documentada em detalhe.
@@ -231,8 +240,9 @@ Cada descoberta segue o mesmo formato: como apareceu, a evidência, o que mudou 
 | 31 | Correção | Uma resposta malformada derrubava a pergunta | Repetições da medição da descoberta 30 | O modelo repetiu os números das citações até a resposta ser cortada; o SDK da OpenAI levantou o erro de validação antes da proteção do pipeline, e a pergunta terminou numa exceção | Tamanho máximo de 1.000 tokens (a maior resposta usou 285) e erro de formato convertido em recusa, conferido com a API real e com um teste |
 | 32 | Elogios | O modelo não seguia a regra do tema exclusivo | Piloto da classificação dos elogios | "Elogio sem motivo específico" vinha junto com motivos específicos em 69% das avaliações; reescrever a instrução reduziu para 53% | A regra passou para o código (`Taxonomy.normalize`), que é determinístico: o tema ficou com 23% das avaliações, só as que não dizem o motivo |
 | 33 | Elogios | Uma em cada nove notas altas traz uma reclamação | Classificação da base inteira dos elogios | 3.005 avaliações positivas (10,9%) com ressalva, e 32,6% nos pedidos atrasados, contra 10,2% nos entregues no prazo | "Com ressalva" fica fora do ranking dos elogios e aparece à parte no Panorama |
+| 34 | Correção | Filtros contraditórios eram respondidos com a contagem geral | Retorno do professor, usando a interface | Sentimento negativo com nota 5: a busca voltava vazia, e a contagem usava as 10.836 avaliações negativas, porque a lista de notas ficava vazia e era lida como "sem filtro" | A contagem respeita as notas escolhidas; sem avaliação nos filtros, a pergunta é recusada na busca, com o motivo |
 
-Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; a 17 no item 5 de "Avaliação e escolha do modelo"; as 18 e 19 em "Tecnologias e bibliotecas"; as de 20 a 25 em "Frequência por tema"; a 26 em "Identidade visual"; a 27 em "As contagens no sistema"; a 28 em "Busca quase exata"; as 29 e 30 no item 6 de "Avaliação e escolha do modelo"; a 31 no item 7; e as 32 e 33 em "Frequência dos elogios".
+Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; a 17 no item 5 de "Avaliação e escolha do modelo"; as 18 e 19 em "Tecnologias e bibliotecas"; as de 20 a 25 em "Frequência por tema"; a 26 em "Identidade visual"; a 27 em "As contagens no sistema"; a 28 em "Busca quase exata"; as 29 e 30 no item 6 de "Avaliação e escolha do modelo"; a 31 no item 7; as 32 e 33 em "Frequência dos elogios"; e a 34 em "As contagens no sistema".
 
 ## O que o processo ensinou
 
@@ -249,6 +259,7 @@ Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e í
 11. **A linha de base vigia também a infraestrutura.** A reindexação não mudou nenhuma linha da busca nem nenhum vetor, e mesmo assim a linha de base acusou diferenças. Sem ela, a troca da data teria passado como uma mudança só de metadados, e o corte de recusa continuaria apoiado numa medida que variava a cada reconstrução do índice. Comparar com a busca exata separou o que era aproximação do que seria erro.
 12. **Uma métrica melhor não é uma resposta melhor.** A primeira versão da regra da PR #23 fez uma pergunta legítima passar de recusada a respondida, o que pela métrica é uma melhora. A leitura da resposta mostrou o defeito que a regra combatia: um resumo de outro assunto, com a ressalva de que o ponto perguntado não aparecia. Uma mudança no prompt também precisa ser conferida com perguntas que não participaram da sua redação, ou ela só mostra que decorou a prova.
 13. **Regra que o modelo não segue de forma consistente vai para o código.** A regra do tema exclusivo estava clara na instrução e foi ignorada em metade dos casos. Reescrevê-la ajudou pouco. Tudo o que pode ser decidido de forma determinística a partir da saída do modelo deve ser decidido no código, onde é testável e não varia entre execuções.
+14. **Uma lista vazia não é o mesmo que nenhum filtro.** Ao aproveitar só as notas que cabiam na contagem, o código podia ficar com uma lista vazia, e ela era tratada como "sem filtro": o caso mais restritivo virava o mais amplo. Quando uma combinação de filtros não pode ter resultado, o sistema deve dizer isso, e não ampliar a busca em silêncio. O caso veio de quem usou a interface com uma combinação que nenhum teste previa, como na lição 5.
 
 ## Pendências
 
