@@ -32,12 +32,14 @@ flowchart TD
     E13 --> E14["Correção: armadilhas de dado objetivo<br/>PR #23"]
     E14 --> E15["Frequência dos elogios<br/>PR #24"]
     E15 --> E16["Correção: filtros sem avaliações<br/>PR #30"]
+    E16 --> E17["Correção: há relatos, sem contagem<br/>PR #31"]
     E13 -.->|"'principais' e 'mais elogiam'<br/>passam a ser frequência"| E11
     E5 -.->|"a busca não mede frequência:<br/>contar à parte"| E11
     E13 -.->|"reindexação: a busca aproximada<br/>perdia vizinhos"| E3
     E14 -.->|"evidências melhores:<br/>nova regra de recusa"| E5
     E11 -.->|"mesma técnica:<br/>elogios"| E15
     E16 -.->|"retorno do professor:<br/>contagem com filtros contraditórios"| E11
+    E17 -.->|"retorno do professor:<br/>frequente sem contagem"| E5
 
     E3 -.->|"Achado 1: o embedding confunde<br/>elogio com reclamação"| E4
     E3 -.->|"Achado 2: similaridades<br/>numa faixa estreita"| E4
@@ -79,6 +81,7 @@ As setas contínuas são a ordem das etapas. As tracejadas são as **realimenta�
 | #23 | 06/11/2026 | `fix/armadilha-correios` | Correção | Regra para perguntas que pedem um dado ausente das avaliações; resposta malformada convertida em recusa |
 | #24 | 06/11/2026 | `feature/temas-elogios` | Frequência por tema | Temas dos elogios descobertos e classificados nas 27.527 avaliações positivas; Panorama e respostas com a contagem dos elogios |
 | #30 | 21/11/2026 | `fix/filtros-sem-avaliacoes` | Correção | Filtros que nenhuma avaliação atende passam a ser recusados na busca, com o motivo, em vez de respondidos com a contagem geral |
+| #31 | 21/11/2026 | `fix/relatos-sem-contagem` | Correção | Respostas sem contagem passam a dizer "há relatos", e não "frequentes" ou "a maioria"; medida automática na avaliação |
 
 ## Etapas
 
@@ -201,6 +204,12 @@ Repetimos o caminho da etapa 10 sobre as avaliações positivas: o agrupamento p
 
 Reproduzimos o caso sem chamar a API, só com a busca e a contagem: sentimento negativo com nota 5 produzia uma contagem de 10.836 avaliações, todas as negativas (descoberta 34). A correção ficou no código, nos dois pontos em que o erro passava, e foi conferida com o índice real e com um LLM falso que falharia se fosse chamado. O prompt não mudou, então as respostas das demais perguntas não mudam.
 
+### Correção: "há relatos", sem contagem (PR #31)
+
+**Objetivo:** atender à segunda sugestão do professor: usar "há relatos" e guardar "frequentes" para quando houver uma contagem.
+
+Medimos antes de mudar: nas respostas sem contagem da última avaliação, o `gpt-4.1-mini` usava essas palavras em 5 de 40 (descoberta 35). A regra foi redigida a partir desses casos e conferida com 10 perguntas novas, repetidas 3 vezes antes e depois da mudança. Como a mudança é no prompt de sistema (lição 10), as mensagens do usuário não mudaram, e a avaliação completa com os dois modelos conferiu que as demais métricas continuaram iguais. A medida das palavras de frequência passou a fazer parte da avaliação.
+
 ## Descobertas que mudaram o rumo
 
 Cada descoberta segue o mesmo formato: como apareceu, a evidência, o que mudou e onde está documentada em detalhe.
@@ -241,8 +250,9 @@ Cada descoberta segue o mesmo formato: como apareceu, a evidência, o que mudou 
 | 32 | Elogios | O modelo não seguia a regra do tema exclusivo | Piloto da classificação dos elogios | "Elogio sem motivo específico" vinha junto com motivos específicos em 69% das avaliações; reescrever a instrução reduziu para 53% | A regra passou para o código (`Taxonomy.normalize`), que é determinístico: o tema ficou com 23% das avaliações, só as que não dizem o motivo |
 | 33 | Elogios | Uma em cada nove notas altas traz uma reclamação | Classificação da base inteira dos elogios | 3.005 avaliações positivas (10,9%) com ressalva, e 32,6% nos pedidos atrasados, contra 10,2% nos entregues no prazo | "Com ressalva" fica fora do ranking dos elogios e aparece à parte no Panorama |
 | 34 | Correção | Filtros contraditórios eram respondidos com a contagem geral | Retorno do professor, usando a interface | Sentimento negativo com nota 5: a busca voltava vazia, e a contagem usava as 10.836 avaliações negativas, porque a lista de notas ficava vazia e era lida como "sem filtro" | A contagem respeita as notas escolhidas; sem avaliação nos filtros, a pergunta é recusada na busca, com o motivo |
+| 35 | Correção | Sem contagem, o modelo dizia quanto um assunto aparece | Retorno do professor, na resposta sobre rastreamento | 5 de 40 respostas sem contagem do `gpt-4.1-mini` com "frequentes", "a maioria" ou "geralmente"; 4 de 30 em perguntas novas | Regra 5: "há relatos de..."; 0 de 40 e 0 de 30 depois, sem mudar as outras métricas |
 
-Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; a 17 no item 5 de "Avaliação e escolha do modelo"; as 18 e 19 em "Tecnologias e bibliotecas"; as de 20 a 25 em "Frequência por tema"; a 26 em "Identidade visual"; a 27 em "As contagens no sistema"; a 28 em "Busca quase exata"; as 29 e 30 no item 6 de "Avaliação e escolha do modelo"; a 31 no item 7; as 32 e 33 em "Frequência dos elogios"; e a 34 em "As contagens no sistema".
+Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e índice vetorial"; as de 6 a 8 e a 13 em "Busca das evidências"; as de 9, 10, 14 e 16 em "Resposta com o LLM"; as de 11, 12 e 15 em "Interface"; a 17 no item 5 de "Avaliação e escolha do modelo"; as 18 e 19 em "Tecnologias e bibliotecas"; as de 20 a 25 em "Frequência por tema"; a 26 em "Identidade visual"; a 27 em "As contagens no sistema"; a 28 em "Busca quase exata"; as 29 e 30 no item 6 de "Avaliação e escolha do modelo"; a 31 no item 7; as 32 e 33 em "Frequência dos elogios"; a 34 em "As contagens no sistema"; e a 35 no item 8 de "Avaliação e escolha do modelo".
 
 ## O que o processo ensinou
 
@@ -260,6 +270,7 @@ Os detalhes de cada descoberta estão no README: as de 1 a 4 em "Embeddings e í
 12. **Uma métrica melhor não é uma resposta melhor.** A primeira versão da regra da PR #23 fez uma pergunta legítima passar de recusada a respondida, o que pela métrica é uma melhora. A leitura da resposta mostrou o defeito que a regra combatia: um resumo de outro assunto, com a ressalva de que o ponto perguntado não aparecia. Uma mudança no prompt também precisa ser conferida com perguntas que não participaram da sua redação, ou ela só mostra que decorou a prova.
 13. **Regra que o modelo não segue de forma consistente vai para o código.** A regra do tema exclusivo estava clara na instrução e foi ignorada em metade dos casos. Reescrevê-la ajudou pouco. Tudo o que pode ser decidido de forma determinística a partir da saída do modelo deve ser decidido no código, onde é testável e não varia entre execuções.
 14. **Uma lista vazia não é o mesmo que nenhum filtro.** Ao aproveitar só as notas que cabiam na contagem, o código podia ficar com uma lista vazia, e ela era tratada como "sem filtro": o caso mais restritivo virava o mais amplo. Quando uma combinação de filtros não pode ter resultado, o sistema deve dizer isso, e não ampliar a busca em silêncio. O caso veio de quem usou a interface com uma combinação que nenhum teste previa, como na lição 5.
+15. **Uma palavra também é um número.** A regra contra números inventados cobria porcentagens e totais, mas "frequentes" e "a maioria" afirmam uma proporção do mesmo jeito. Nenhuma métrica as contava, e por isso nenhuma rodada as apontou. Uma regra só é verificável quando a avaliação mede o que ela proíbe.
 
 ## Pendências
 

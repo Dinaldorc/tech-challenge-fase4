@@ -7,6 +7,7 @@ modelo e mede:
 - perguntas fora do tema recusadas, separando a recusa da busca (sem custo) da recusa do LLM;
 - citações inexistentes, tokens e tempo por chamada;
 - respostas com palavras de outro alfabeto (por exemplo, georgiano no meio do português);
+- respostas sem contagem real que dizem quanto um assunto aparece ("frequentes", "a maioria"...);
 - respostas que citam uma loja pelo pseudônimo ("lannister", "stark"...) sem avisar que é um pseudônimo;
 - nas perguntas de frequência sobre reclamações e sobre elogios, se a contagem real foi enviada e se a resposta traz
   porcentagens que não estão nela.
@@ -64,6 +65,11 @@ FREQUENCY_QUESTIONS = [
     ("Quais aspectos da experiência de compra são mais elogiados pelos clientes?", ""),
     ("Quais elogios aparecem com maior frequência?", "categoria=moveis_decoracao"),
 ]
+# Palavras que dizem quanto um assunto aparece. Sem a contagem real, as 8 evidências não permitem dizer isso.
+FREQUENCY_WORDS = re.compile(
+    r"\b(?:frequent\w*|comuns?|recorrent\w*|maioria|maior parte|muitos clientes|muitas avalia\w*|geralmente|costuma\w*)\b",
+    re.IGNORECASE,
+)
 PSEUDONYM_WARNING = re.compile(r"pseud[oô]nimo|anonimiz", re.IGNORECASE)
 PSEUDONYM_QUESTIONS = [
     "O que os clientes falam da lannister?",
@@ -210,6 +216,9 @@ def main() -> None:
         unmarked = citing[citing["answer"].map(unmarked_pseudonym)]
         print(f"  pseudônimo sem aviso:    {len(unmarked)}/{len(citing)} respostas que citam uma loja"
               f" {unmarked['question'].tolist()}")
+        no_count = answered[~answered["theme_stats"].astype(bool)]
+        worded = no_count[no_count["answer"].str.contains(FREQUENCY_WORDS)]
+        print(f"  frequência sem contagem: {len(worded)}/{len(no_count)} respostas {worded['question'].tolist()}")
         foreign = [(q, foreign_words(a)) for q, a in zip(frame["question"], frame["answer"]) if foreign_words(a)]
         print(f"  outro alfabeto:          {len(foreign)}/{len(frame)} respostas {foreign}")
         print(f"  chamadas ao LLM:         {len(llm_calls)} | tokens médios {llm_calls['input_tokens'].mean():.0f}"
